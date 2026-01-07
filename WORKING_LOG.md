@@ -25,4 +25,16 @@
 - Adjusted Makefile to rebuild the api image for test/clean while requiring running services.
 - Verified `make test` runs successfully with coverage in Docker.
 - Ran `make stop`, `make start`, `make clean`, and `make test` end-to-end; all passed.
+- Added Speaker model and DB ops helpers for speaker creation.
+- Added Alembic setup and initial migration for speakers.
+- Added Make targets and README docs for migrations.
+- Updated uv.lock and ran ruff/mypy after adding Alembic files.
+- Added async DB ops tests for speaker and bot creation using the test database.
+- Ran full test suite after adding speaker tests; all passed.
+- Updated tests to apply Alembic migrations for the test database and validate schema alignment.
+- Reset test database before running migrations to avoid stale schema.
 - Added linting, type checking, and vulnerability audit tooling.
+- Ran `make test` in Docker; all 6 tests passed with 85% coverage.
+- Ran `make clean`; ruff check/format, mypy, and pip-audit all passed.
+- Verified main Postgres schema via `psql`; no tables present (migrations not yet applied to the primary DB).
+- Applied migrations to the primary DB; `speakers` and `alembic_version` tables now present.

@@ -37,7 +37,13 @@
   - `curl -H "Authorization: Bearer <API_TOKEN>" -H "Content-Type: application/json" -X POST http://localhost:8000/chat -d '{"user_id":"u1","message":"hello"}'`
 
 ## Migrations
-- Not wired yet.
+- Migrations use Alembic and the `DATABASE_URL` from the running Compose stack.
+- Define or update models in `app/models.py`, then generate a migration.
+- Create a new migration:
+  - `make migration name=add_speakers`
+- Apply migrations:
+  - `make migrate`
+- If running locally (outside Docker), set `DATABASE_URL` before running Alembic.
 
 ## LLM Integration
 - Not wired yet.
@@ -54,6 +60,7 @@
 - Run the connection test inside the Compose network (uses `DATABASE_URL_TEST` pointing at `db`):
   - `docker compose run --rm api uv run pytest tests/test_db_connection.py`
 - The test database is `texet_test` inside the same Postgres container.
+- Tests apply Alembic migrations to `texet_test` before running.
 - Run chat endpoint tests:
   - `uv run pytest tests/test_chat_endpoint.py`
 - Run all tests with coverage (local):
@@ -78,6 +85,8 @@
 - `make stop` stops and removes the stack (including volumes).
 - `make test` runs the full test suite with coverage (requires `make start` first).
 - `make clean` runs linting, formatting, type checks, and vulnerability audit (requires `make start` first).
+- `make migration name=...` creates a new Alembic revision (requires `make start` first).
+- `make migrate` applies Alembic migrations (requires `make start` first).
 
 ## Notes
 - 

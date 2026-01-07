@@ -1,4 +1,4 @@
-.PHONY: start stop test clean check
+.PHONY: start stop test clean check migration migrate
 
 start:
 	docker compose up --build -d
@@ -16,6 +16,15 @@ clean:
 	docker compose run --rm --build api uv run ruff format .
 	docker compose run --rm --build api uv run mypy
 	docker compose run --rm --build api uv run pip-audit
+
+migration:
+	$(MAKE) check
+	@if [ -z "$(name)" ]; then echo "Usage: make migration name=..."; exit 1; fi
+	docker compose run --rm --build api alembic revision --autogenerate -m "$(name)"
+
+migrate:
+	$(MAKE) check
+	docker compose run --rm --build api alembic upgrade head
 
 check:
 	@services="$$(docker compose ps --status running --services)"; \
