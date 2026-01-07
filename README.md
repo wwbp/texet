@@ -73,5 +73,11 @@
 - Combined:
   - `uv run ruff check . && uv run ruff format . && uv run mypy && uv run pip-audit`
 
+## Make Targets
+- `make start` builds and starts the stack.
+- `make stop` stops and removes the stack (including volumes).
+- `make test` runs the full test suite with coverage (requires `make start` first).
+- `make clean` runs linting, formatting, type checks, and vulnerability audit (requires `make start` first).
+
 ## Notes
 - 

@@ -20,4 +20,9 @@
 - Simplified chat endpoint tests to the minimal critical cases.
 - Re-ran full test suite with coverage after test simplification; all passed.
 - Ran ruff (lint/format), mypy, and pip-audit; all clean.
+- Added Makefile targets for start/stop/test/clean.
+- Updated Makefile to require running services before test/clean.
+- Adjusted Makefile to rebuild the api image for test/clean while requiring running services.
+- Verified `make test` runs successfully with coverage in Docker.
+- Ran `make stop`, `make start`, `make clean`, and `make test` end-to-end; all passed.
 - Added linting, type checking, and vulnerability audit tooling.
