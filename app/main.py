@@ -1,11 +1,10 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 
 from app.db import ping_db
 from app.routes import chat as chat_routes
-
 
 app = FastAPI(
     title="Texet API",
@@ -19,7 +18,7 @@ app.include_router(chat_routes.router)
 def root() -> dict[str, str]:
     return {
         "message": "Texet API is running.",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
 

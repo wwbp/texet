@@ -4,7 +4,6 @@ import secrets
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-
 _security = HTTPBearer(auto_error=False)
 
 

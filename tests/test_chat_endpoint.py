@@ -25,6 +25,7 @@ def test_chat_validates_payload(client_with_token: TestClient) -> None:
     )
     assert response.status_code == 422
 
+
 def test_chat_success(client_with_token: TestClient) -> None:
     client = client_with_token
     payload = {"user_id": "u1", "message": "hello"}

@@ -17,9 +17,7 @@ async def test_db_connection() -> None:
 
     conn = await asyncpg.connect(admin_url.render_as_string(hide_password=False))
     try:
-        exists = await conn.fetchval(
-            "SELECT 1 FROM pg_database WHERE datname = $1", url.database
-        )
+        exists = await conn.fetchval("SELECT 1 FROM pg_database WHERE datname = $1", url.database)
         if not exists:
             await conn.execute(f'CREATE DATABASE "{url.database}"')
     finally:

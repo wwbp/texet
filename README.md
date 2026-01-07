@@ -61,5 +61,17 @@
 - Run all tests with coverage (Docker):
   - `docker compose run --rm api uv run pytest --cov`
 
+## Quality Checks
+- Lint:
+  - `uv run ruff check .`
+- Format:
+  - `uv run ruff format .`
+- Type check:
+  - `uv run mypy`
+- Vulnerability audit:
+  - `uv run pip-audit`
+- Combined:
+  - `uv run ruff check . && uv run ruff format . && uv run mypy && uv run pip-audit`
+
 ## Notes
 - 

@@ -19,3 +19,5 @@
 - Ran full test suite with coverage in Docker; all tests passed.
 - Simplified chat endpoint tests to the minimal critical cases.
 - Re-ran full test suite with coverage after test simplification; all passed.
+- Ran ruff (lint/format), mypy, and pip-audit; all clean.
+- Added linting, type checking, and vulnerability audit tooling.

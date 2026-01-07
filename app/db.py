@@ -2,7 +2,12 @@ import os
 from functools import lru_cache
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 
 def _get_database_url() -> str:
@@ -25,4 +30,5 @@ async def ping_db() -> bool:
     engine = get_engine()
     async with engine.connect() as connection:
         result = await connection.execute(text("SELECT 1"))
-        return result.scalar_one() == 1
+        value = int(result.scalar_one())
+        return value == 1
