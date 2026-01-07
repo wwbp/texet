@@ -20,6 +20,9 @@
 - Configure database env vars:
   - `cp .env.db.example .env.db`
   - Update `POSTGRES_PASSWORD` in `.env.db`
+- Configure API auth:
+  - `cp .env.api.example .env.api`
+  - Update `API_TOKEN` in `.env.api`
 
 ## Run
 - Local dev:
@@ -31,6 +34,7 @@
   - `curl http://localhost:8000/`
   - `docker compose exec db pg_isready -U texet -d texet`
   - `curl http://localhost:8000/db/health`
+  - `curl -H "Authorization: Bearer <API_TOKEN>" -H "Content-Type: application/json" -X POST http://localhost:8000/chat -d '{"user_id":"u1","message":"hello"}'`
 
 ## Migrations
 - Not wired yet.
@@ -50,6 +54,12 @@
 - Run the connection test inside the Compose network (uses `DATABASE_URL_TEST` pointing at `db`):
   - `docker compose run --rm api uv run pytest tests/test_db_connection.py`
 - The test database is `texet_test` inside the same Postgres container.
+- Run chat endpoint tests:
+  - `uv run pytest tests/test_chat_endpoint.py`
+- Run all tests with coverage (local):
+  - `uv run pytest --cov`
+- Run all tests with coverage (Docker):
+  - `docker compose run --rm api uv run pytest --cov`
 
 ## Notes
 - 

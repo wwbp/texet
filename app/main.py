@@ -4,6 +4,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 
 from app.db import ping_db
+from app.routes import chat as chat_routes
 
 
 app = FastAPI(
@@ -11,6 +12,7 @@ app = FastAPI(
     version="0.1.0",
     description="Base API scaffold for Texet.",
 )
+app.include_router(chat_routes.router)
 
 
 @app.get("/", response_class=JSONResponse)

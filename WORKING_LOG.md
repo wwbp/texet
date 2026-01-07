@@ -13,3 +13,9 @@
 - Wired the API to Postgres via async SQLAlchemy + asyncpg and added a DB connection test.
 - Standardized DB URLs to use the Compose service host for both main and test databases.
 - Fixed the DB test to keep passwords intact and verified it passes in Compose.
+- Added chat endpoint with bearer-token auth, validation, and unit tests.
+- Ran chat endpoint tests in Docker; all passed.
+- Added coverage configuration and documented how to run full test suite with coverage.
+- Ran full test suite with coverage in Docker; all tests passed.
+- Simplified chat endpoint tests to the minimal critical cases.
+- Re-ran full test suite with coverage after test simplification; all passed.
