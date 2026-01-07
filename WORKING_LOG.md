@@ -44,3 +44,7 @@
 - Added an Alembic migration to create conversations/utterances and add `created_at` to speakers.
 - Adjusted Makefile migration targets to bind-mount the repo so new revisions persist on disk.
 - Added db ops tests for conversations/utterances and ran the full test suite (all passing).
+- Wired chat handler to persist conversations and utterances with a stubbed reply.
+- Updated chat response schema and endpoint to use async DB session dependency.
+- Reworked chat endpoint tests to use AsyncClient, test persistence, and validate response shape.
+- Ran `make test`; all 8 tests passed.

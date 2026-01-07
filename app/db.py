@@ -1,4 +1,5 @@
 import os
+from collections.abc import AsyncGenerator
 from functools import lru_cache
 
 from sqlalchemy import text
@@ -24,6 +25,12 @@ def get_engine() -> AsyncEngine:
 
 def get_sessionmaker() -> async_sessionmaker[AsyncSession]:
     return async_sessionmaker(get_engine(), expire_on_commit=False)
+
+
+async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
+    sessionmaker = get_sessionmaker()
+    async with sessionmaker() as session:
+        yield session
 
 
 async def ping_db() -> bool:

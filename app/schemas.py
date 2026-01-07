@@ -10,6 +10,6 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    user_id: str
-    message: str
-    status: str
+    conversation_id: str
+    reply_utterance_id: str
+    text: str
