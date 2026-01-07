@@ -1,0 +1,10 @@
+[project]
+name = "texet"
+version = "0.1.0"
+description = "Base API scaffold for Texet."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+]
