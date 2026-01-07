@@ -1,9 +1,9 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db_ops import (
-    create_conversation,
     create_utterance,
     get_or_create_bot_speaker,
+    get_or_create_conversation,
     get_or_create_speaker,
 )
 from app.schemas import ChatRequest, ChatResponse
@@ -20,7 +20,7 @@ async def process_chat(session: AsyncSession, payload: ChatRequest) -> ChatRespo
         )
         bot = await get_or_create_bot_speaker(session, payload.user_id)
 
-        conversation = await create_conversation(session, speaker.id)
+        conversation = await get_or_create_conversation(session, speaker.id)
 
         user_utterance = await create_utterance(
             session,

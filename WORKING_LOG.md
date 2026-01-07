@@ -48,3 +48,13 @@
 - Updated chat response schema and endpoint to use async DB session dependency.
 - Reworked chat endpoint tests to use AsyncClient, test persistence, and validate response shape.
 - Ran `make test`; all 8 tests passed.
+- Added a partial unique index to enforce one open conversation per user.
+- Implemented get-or-create conversation logic with savepoints for concurrency safety.
+- Updated chat flow/tests to reuse the open conversation and validate utterance counts.
+- Applied migrations before generating the new index migration.
+- Ran `make test`; all 9 tests passed.
+- Added an interleaved multi-user chat test to validate conversation reuse and persistence.
+- Ran `make test`; all 10 tests passed.
+- Applied latest migrations (`make migrate`).
+- Ran `make clean` and `make test`; all checks/tests passed.
+- Stopped the Docker stack (`make stop`).

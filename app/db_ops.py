@@ -3,6 +3,8 @@ from __future__ import annotations
 import datetime
 from typing import Any
 
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Conversation, Speaker, Utterance
@@ -47,6 +49,47 @@ async def create_conversation(
     return conversation
 
 
+async def get_or_create_conversation(
+    session: AsyncSession,
+    owner_speaker_id: str,
+    status: str = "open",
+    meta: dict[str, Any] | None = None,
+) -> Conversation:
+    result = await session.execute(
+        select(Conversation).where(
+            Conversation.owner_speaker_id == owner_speaker_id,
+            Conversation.status == status,
+        )
+    )
+    conversation = result.scalar_one_or_none()
+    if conversation:
+        return conversation
+
+    try:
+        async with session.begin_nested():
+            conversation = Conversation(
+                owner_speaker_id=owner_speaker_id,
+                status=status,
+                meta=meta,
+            )
+            session.add(conversation)
+            await session.flush()
+            return conversation
+    except IntegrityError:
+        pass
+
+    result = await session.execute(
+        select(Conversation).where(
+            Conversation.owner_speaker_id == owner_speaker_id,
+            Conversation.status == status,
+        )
+    )
+    conversation = result.scalar_one_or_none()
+    if not conversation:
+        raise RuntimeError("Failed to create or fetch conversation.")
+    return conversation
+
+
 async def create_utterance(
     session: AsyncSession,
     conversation_id: str,
@@ -55,7 +98,7 @@ async def create_utterance(
     reply_to_id: str | None = None,
     meta: dict[str, Any] | None = None,
 ) -> Utterance:
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
     conversation = await session.get(Conversation, conversation_id)
     if not conversation:
         raise ValueError("Conversation not found for utterance.")
