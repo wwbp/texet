@@ -38,3 +38,9 @@
 - Ran `make clean`; ruff check/format, mypy, and pip-audit all passed.
 - Verified main Postgres schema via `psql`; no tables present (migrations not yet applied to the primary DB).
 - Applied migrations to the primary DB; `speakers` and `alembic_version` tables now present.
+- Updated README overview to reflect Postgres + migrations scope.
+- Moved `created_at` to the SQLAlchemy base model for shared timestamps.
+- Added `Conversation` and `Utterance` models plus db ops for creating conversations and utterances.
+- Added an Alembic migration to create conversations/utterances and add `created_at` to speakers.
+- Adjusted Makefile migration targets to bind-mount the repo so new revisions persist on disk.
+- Added db ops tests for conversations/utterances and ran the full test suite (all passing).

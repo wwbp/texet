@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import datetime
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Speaker
+from app.models import Conversation, Speaker, Utterance
 
 
 def bot_speaker_id(user_id: str) -> str:
@@ -28,3 +29,47 @@ async def get_or_create_speaker(
 
 async def get_or_create_bot_speaker(session: AsyncSession, user_id: str) -> Speaker:
     return await get_or_create_speaker(session, bot_speaker_id(user_id), meta={"type": "bot"})
+
+
+async def create_conversation(
+    session: AsyncSession,
+    owner_speaker_id: str,
+    status: str = "open",
+    meta: dict[str, Any] | None = None,
+) -> Conversation:
+    conversation = Conversation(
+        owner_speaker_id=owner_speaker_id,
+        status=status,
+        meta=meta,
+    )
+    session.add(conversation)
+    await session.flush()
+    return conversation
+
+
+async def create_utterance(
+    session: AsyncSession,
+    conversation_id: str,
+    speaker_id: str,
+    text: str,
+    reply_to_id: str | None = None,
+    meta: dict[str, Any] | None = None,
+) -> Utterance:
+    now = datetime.datetime.now(datetime.timezone.utc)
+    conversation = await session.get(Conversation, conversation_id)
+    if not conversation:
+        raise ValueError("Conversation not found for utterance.")
+
+    utterance = Utterance(
+        conversation_id=conversation_id,
+        speaker_id=speaker_id,
+        text=text,
+        reply_to_id=reply_to_id,
+        meta=meta,
+        timestamp=now,
+    )
+    session.add(utterance)
+    conversation.last_activity_at = now
+
+    await session.flush()
+    return utterance

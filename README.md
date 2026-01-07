@@ -1,8 +1,8 @@
 # Project README
 
 ## Overview
-- Purpose: Base FastAPI scaffold with Docker Compose and uv for dependency management.
-- Scope: API service only (database + LLM integration will be added later).
+- Purpose: FastAPI API scaffold with Docker Compose, uv, and async Postgres access.
+- Scope: API + Postgres with Alembic migrations; LLM integration remains a stub.
 - Audience: Project collaborators.
 
 ## Structure

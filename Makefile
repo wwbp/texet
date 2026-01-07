@@ -20,11 +20,11 @@ clean:
 migration:
 	$(MAKE) check
 	@if [ -z "$(name)" ]; then echo "Usage: make migration name=..."; exit 1; fi
-	docker compose run --rm --build api alembic revision --autogenerate -m "$(name)"
+	docker compose run --rm --build -v $(CURDIR):/app api alembic revision --autogenerate -m "$(name)"
 
 migrate:
 	$(MAKE) check
-	docker compose run --rm --build api alembic upgrade head
+	docker compose run --rm --build -v $(CURDIR):/app api alembic upgrade head
 
 check:
 	@services="$$(docker compose ps --status running --services)"; \
