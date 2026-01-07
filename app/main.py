@@ -1,7 +1,9 @@
 from datetime import datetime, timezone
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
+
+from app.db import ping_db
 
 
 app = FastAPI(
@@ -22,3 +24,15 @@ def root() -> dict[str, str]:
 @app.get("/health", response_class=JSONResponse)
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/db/health", response_class=JSONResponse)
+async def db_health() -> dict[str, str]:
+    try:
+        ok = await ping_db()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Database not reachable.") from exc
+
+    return {"status": "ok" if ok else "error"}

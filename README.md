@@ -17,15 +17,20 @@
 - Install uv: https://docs.astral.sh/uv/getting-started/installation/
 - Create the local environment and lockfile:
   - `uv sync`
+- Configure database env vars:
+  - `cp .env.db.example .env.db`
+  - Update `POSTGRES_PASSWORD` in `.env.db`
 
 ## Run
 - Local dev:
   - `uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`
 - Docker:
-  - `docker compose up --build`
+  - `docker compose up --build -d`
 - Verify:
   - `curl http://localhost:8000/health`
   - `curl http://localhost:8000/`
+  - `docker compose exec db pg_isready -U texet -d texet`
+  - `curl http://localhost:8000/db/health`
 
 ## Migrations
 - Not wired yet.
@@ -38,6 +43,13 @@
   - `uv add <package>`
 - Upgrade a package:
   - `uv lock --upgrade-package <package>`
+
+## Tests
+- Ensure the DB is running:
+  - `docker compose up -d db`
+- Run the connection test inside the Compose network (uses `DATABASE_URL_TEST` pointing at `db`):
+  - `docker compose run --rm api uv run pytest tests/test_db_connection.py`
+- The test database is `texet_test` inside the same Postgres container.
 
 ## Notes
 - 

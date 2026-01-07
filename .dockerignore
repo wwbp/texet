@@ -14,4 +14,6 @@ build
 .pytest_cache
 .ruff_cache
 *.log
+.env
+.env.*
 WORKING_LOG.md
