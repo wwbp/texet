@@ -1,6 +1,6 @@
 import pytest
 
-from app.constants import MESSAGE_MAX_LENGTH
+from app.config import MESSAGE_MAX_LENGTH
 from app.services import chat as chat_service
 
 

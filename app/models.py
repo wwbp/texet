@@ -8,7 +8,8 @@ from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, Tex
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from app.constants import UTTERANCE_STATUS_RECEIVED, UTTERANCE_STATUSES_SQL
+from app.config import UTTERANCE_STATUS_RECEIVED, UTTERANCE_STATUSES_SQL
+
 
 def _utcnow() -> datetime.datetime:
     return datetime.datetime.now(datetime.UTC)

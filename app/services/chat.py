@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
 )
 
-from app.constants import (
+from app.config import (
     MESSAGE_MAX_LENGTH,
     MESSAGE_MIN_LENGTH,
     UTTERANCE_STATUS_FAILED,
@@ -91,10 +91,7 @@ def _background_sessionmaker(
     bind = session.bind
     if bind is None:
         return get_sessionmaker()
-    if isinstance(bind, AsyncConnection):
-        engine = bind.engine
-    else:
-        engine = bind
+    engine = bind.engine if isinstance(bind, AsyncConnection) else bind
     if not isinstance(engine, AsyncEngine):
         return get_sessionmaker()
     return async_sessionmaker(engine, expire_on_commit=False)
@@ -128,10 +125,10 @@ async def _run_deferred_reply(
             await session.commit()
         except Exception as exc:
             await session.rollback()
-            bot_utterance = await session.get(Utterance, bot_utterance_id)
-            if bot_utterance:
-                bot_utterance.status = UTTERANCE_STATUS_FAILED
-                bot_utterance.error = _format_error(exc)
+            failed_utterance = await session.get(Utterance, bot_utterance_id)
+            if failed_utterance:
+                failed_utterance.status = UTTERANCE_STATUS_FAILED
+                failed_utterance.error = _format_error(exc)
                 await session.commit()
 
 

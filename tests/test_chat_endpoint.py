@@ -5,7 +5,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.constants import (
+from app.config import (
     UTTERANCE_STATUS_FAILED,
     UTTERANCE_STATUS_RECEIVED,
     UTTERANCE_STATUS_SENT,

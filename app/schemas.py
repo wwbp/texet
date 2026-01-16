@@ -2,7 +2,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.constants import MESSAGE_MAX_LENGTH, MESSAGE_MIN_LENGTH
+from app.config import MESSAGE_MAX_LENGTH, MESSAGE_MIN_LENGTH
+
 
 class MessagePayload(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")

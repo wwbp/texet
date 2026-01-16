@@ -2,7 +2,7 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.constants import UTTERANCE_STATUS_QUEUED, UTTERANCE_STATUS_RECEIVED
+from app.config import UTTERANCE_STATUS_QUEUED, UTTERANCE_STATUS_RECEIVED
 from app.db_ops import (
     create_conversation,
     create_pending_utterance,

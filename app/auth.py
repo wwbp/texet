@@ -1,8 +1,9 @@
-import os
 import secrets
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
+from app.config import get_api_token
 
 _security = HTTPBearer(auto_error=False)
 
@@ -10,7 +11,7 @@ _security = HTTPBearer(auto_error=False)
 def require_auth(
     credentials: HTTPAuthorizationCredentials | None = Depends(_security),
 ) -> None:
-    token = os.getenv("API_TOKEN")
+    token = get_api_token()
     if not token:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

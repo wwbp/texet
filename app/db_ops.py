@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.constants import (
+from app.config import (
     UTTERANCE_STATUS_QUEUED,
     UTTERANCE_STATUS_RECEIVED,
     UTTERANCE_STATUSES,

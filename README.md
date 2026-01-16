@@ -25,6 +25,14 @@
   - Update `API_TOKEN` in `.env.api`
   - Update `SMS_OUTBOUND_URL` in `.env.api` (outbound SMS webhook endpoint)
 
+## Configuration
+- Centralized config lives in `app/config.py`.
+- `API_TOKEN` (required): bearer token for `/chat`.
+- `SMS_OUTBOUND_URL` (required): webhook endpoint for outbound replies.
+- `SMS_TIMEOUT_SECONDS` (default `10`): outbound HTTP timeout in seconds.
+- `MESSAGE_MIN_LENGTH` (default `1`): minimum characters for inbound/outbound message.
+- `MESSAGE_MAX_LENGTH` (default `4000`): maximum characters for inbound/outbound message.
+
 ## Run
 - Local dev:
   - `uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`
