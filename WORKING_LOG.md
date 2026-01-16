@@ -65,3 +65,4 @@
 - Introduced SMS outbound service integration via `SMS_OUTBOUND_URL`.
 - Updated chat flow to persist a pending bot utterance and send in the background.
 - Expanded tests for queued responses, SMS dispatch, and failure handling.
+- Added an explicit ingest/generate/contribute/qa pipeline with reply validation tests.

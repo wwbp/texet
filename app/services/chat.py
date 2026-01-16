@@ -7,6 +7,8 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from app.constants import (
+    MESSAGE_MAX_LENGTH,
+    MESSAGE_MIN_LENGTH,
     UTTERANCE_STATUS_FAILED,
     UTTERANCE_STATUS_QUEUED,
     UTTERANCE_STATUS_RECEIVED,
@@ -27,7 +29,7 @@ from app.services.sms import send_sms
 ERROR_MAX_CHARS = 500
 
 
-def _preprocess_message(message: str) -> str:
+def _ingest_message(message: str) -> str:
     return message.strip()
 
 
@@ -35,14 +37,40 @@ async def _generate_reply(message: str) -> str:
     return f"echo:{message}"
 
 
-def _postprocess_reply(message: str) -> str:
+def _contribute_reply(message: str) -> str:
     return message.strip()
 
 
+def _qa_reply(message: str) -> str:
+    if len(message) < MESSAGE_MIN_LENGTH:
+        raise ValueError("Reply is empty.")
+    if len(message) > MESSAGE_MAX_LENGTH:
+        raise ValueError(f"Reply exceeds {MESSAGE_MAX_LENGTH} characters.")
+    return message
+
+
 async def _run_pipeline(message: str) -> str:
-    preprocessed = _preprocess_message(message)
-    generated = await _generate_reply(preprocessed)
-    return _postprocess_reply(generated)
+    try:
+        ingested = _ingest_message(message)
+    except Exception as exc:
+        raise RuntimeError(f"pipeline:ingest failed: {exc}") from exc
+
+    try:
+        generated = await _generate_reply(ingested)
+    except Exception as exc:
+        raise RuntimeError(f"pipeline:generate failed: {exc}") from exc
+
+    try:
+        contributed = _contribute_reply(generated)
+    except Exception as exc:
+        raise RuntimeError(f"pipeline:contribute failed: {exc}") from exc
+
+    try:
+        validated = _qa_reply(contributed)
+    except Exception as exc:
+        raise RuntimeError(f"pipeline:qa failed: {exc}") from exc
+
+    return validated
 
 
 def _format_error(exc: Exception) -> str:

@@ -55,6 +55,7 @@
 
 ## LLM Integration
 - Background task pipeline is stubbed (echo response).
+  - Stages: ingest → generate → contribute → qa (length validation).
 
 ## Dependencies
 - Add a package:
