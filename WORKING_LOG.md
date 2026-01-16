@@ -58,3 +58,10 @@
 - Applied latest migrations (`make migrate`).
 - Ran `make clean` and `make test`; all checks/tests passed.
 - Stopped the Docker stack (`make stop`).
+
+## 2026-01-16
+- Switched chat to a deferred reply model with FastAPI background tasks and a queued response.
+- Added utterance status/error tracking plus a migration to support queued/sent/failed replies.
+- Introduced SMS outbound service integration via `SMS_OUTBOUND_URL`.
+- Updated chat flow to persist a pending bot utterance and send in the background.
+- Expanded tests for queued responses, SMS dispatch, and failure handling.

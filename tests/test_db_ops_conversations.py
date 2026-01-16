@@ -2,8 +2,10 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.constants import UTTERANCE_STATUS_QUEUED, UTTERANCE_STATUS_RECEIVED
 from app.db_ops import (
     create_conversation,
+    create_pending_utterance,
     create_utterance,
     get_or_create_conversation,
     get_or_create_speaker,
@@ -75,3 +77,31 @@ async def test_create_utterance_updates_activity(async_session: AsyncSession) ->
     refreshed = await async_session.get(Conversation, conversation.id)
     assert refreshed is not None
     assert refreshed.last_activity_at >= initial_activity
+
+    assert first.status == UTTERANCE_STATUS_RECEIVED
+    assert first.error is None
+    assert second.status == UTTERANCE_STATUS_RECEIVED
+    assert second.error is None
+
+
+@pytest.mark.asyncio
+async def test_create_pending_utterance(async_session: AsyncSession) -> None:
+    speaker = await get_or_create_speaker(
+        async_session, "user-1", meta={"type": "user"}
+    )
+    conversation = await create_conversation(async_session, speaker.id)
+    await async_session.commit()
+
+    pending = await create_pending_utterance(
+        async_session,
+        conversation.id,
+        speaker.id,
+        reply_to_id=None,
+    )
+    await async_session.commit()
+
+    fetched = await async_session.get(Utterance, pending.id)
+    assert fetched is not None
+    assert fetched.status == UTTERANCE_STATUS_QUEUED
+    assert fetched.text is None
+    assert fetched.error is None

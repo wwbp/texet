@@ -23,6 +23,7 @@
 - Configure API auth:
   - `cp .env.api.example .env.api`
   - Update `API_TOKEN` in `.env.api`
+  - Update `SMS_OUTBOUND_URL` in `.env.api` (outbound SMS webhook endpoint)
 
 ## Run
 - Local dev:
@@ -35,6 +36,13 @@
   - `docker compose exec db pg_isready -U texet -d texet`
   - `curl http://localhost:8000/db/health`
   - `curl -H "Authorization: Bearer <API_TOKEN>" -H "Content-Type: application/json" -X POST http://localhost:8000/chat -d '{"user_id":"u1","message":"hello"}'`
+    - Returns `202` with `status: queued`; reply is sent to `SMS_OUTBOUND_URL` in the background.
+
+## Utterance Status
+- `received`: inbound user message stored.
+- `queued`: outbound reply persisted, pending send.
+- `sent`: outbound reply delivered to SMS webhook.
+- `failed`: outbound reply failed; `error` captures the failure.
 
 ## Migrations
 - Migrations use Alembic and the `DATABASE_URL` from the running Compose stack.
@@ -46,7 +54,7 @@
 - If running locally (outside Docker), set `DATABASE_URL` before running Alembic.
 
 ## LLM Integration
-- Not wired yet.
+- Background task pipeline is stubbed (echo response).
 
 ## Dependencies
 - Add a package:

@@ -4,10 +4,11 @@ import datetime
 import uuid
 from typing import Any
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text, text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from app.constants import UTTERANCE_STATUS_RECEIVED, UTTERANCE_STATUSES_SQL
 
 def _utcnow() -> datetime.datetime:
     return datetime.datetime.now(datetime.UTC)
@@ -52,6 +53,12 @@ class Conversation(Base):
 
 class Utterance(Base):
     __tablename__ = "utterances"
+    __table_args__ = (
+        CheckConstraint(
+            f"status in ({UTTERANCE_STATUSES_SQL})",
+            name="ck_utterances_status",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(
         String(32), primary_key=True, default=lambda: uuid.uuid4().hex
@@ -68,5 +75,9 @@ class Utterance(Base):
     timestamp: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow
     )
-    text: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(16), default=UTTERANCE_STATUS_RECEIVED, nullable=False
+    )
+    text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
     meta: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
