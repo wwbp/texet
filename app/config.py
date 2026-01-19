@@ -1,3 +1,4 @@
+import datetime
 import os
 from typing import Final, Literal
 
@@ -37,3 +38,8 @@ UTTERANCE_STATUSES = (
 )
 
 UTTERANCE_STATUSES_SQL = ", ".join(f"'{status}'" for status in UTTERANCE_STATUSES)
+
+DEFAULT_TIMEZONE_NAME: Final[str] = "EST"
+DEFAULT_TIMEZONE: Final[datetime.tzinfo] = datetime.timezone(
+    datetime.timedelta(hours=-5), name=DEFAULT_TIMEZONE_NAME
+)

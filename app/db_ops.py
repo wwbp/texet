@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import (
+    DEFAULT_TIMEZONE,
     UTTERANCE_STATUS_QUEUED,
     UTTERANCE_STATUS_RECEIVED,
     UTTERANCE_STATUSES,
@@ -125,7 +126,7 @@ async def create_utterance(
         raise ValueError("Utterance text is required.")
     if status not in UTTERANCE_STATUSES:
         raise ValueError(f"Invalid utterance status: {status}")
-    now = datetime.datetime.now(datetime.UTC)
+    now = datetime.datetime.now(DEFAULT_TIMEZONE)
     conversation = await session.get(Conversation, conversation_id)
     if not conversation:
         raise ValueError("Conversation not found for utterance.")
@@ -154,7 +155,7 @@ async def create_queued_utterance(
     reply_to_id: str | None = None,
     meta: dict[str, Any] | None = None,
 ) -> Utterance:
-    now = datetime.datetime.now(datetime.UTC)
+    now = datetime.datetime.now(DEFAULT_TIMEZONE)
     conversation = await session.get(Conversation, conversation_id)
     if not conversation:
         raise ValueError("Conversation not found for utterance.")

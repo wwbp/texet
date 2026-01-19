@@ -1,10 +1,11 @@
-from datetime import UTC, datetime
+import datetime
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_auth
+from app.config import DEFAULT_TIMEZONE
 from app.db import get_async_session, ping_db
 from app.schemas import ChatQueuedResponse, ChatRequest
 from app.services.chat import process_chat
@@ -34,7 +35,7 @@ async def chat(
 def root() -> dict[str, str]:
     return {
         "message": "Texet API is running.",
-        "timestamp": datetime.now(UTC).isoformat(),
+        "timestamp": datetime.datetime.now(DEFAULT_TIMEZONE).isoformat(),
     }
 
 

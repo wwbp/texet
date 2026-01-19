@@ -6,6 +6,7 @@ from sqlalchemy import text
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from app.config import DEFAULT_TIMEZONE_NAME
 
 @pytest.mark.asyncio
 async def test_db_connection() -> None:
@@ -23,7 +24,11 @@ async def test_db_connection() -> None:
     finally:
         await conn.close()
 
-    engine = create_async_engine(database_url, pool_pre_ping=True)
+    engine = create_async_engine(
+        database_url,
+        pool_pre_ping=True,
+        connect_args={"server_settings": {"timezone": DEFAULT_TIMEZONE_NAME}},
+    )
     async with engine.connect() as connection:
         result = await connection.execute(text("SELECT 1"))
         assert result.scalar_one() == 1

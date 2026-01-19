@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from alembic import command
+from app.config import DEFAULT_TIMEZONE_NAME
 from app.models import Base
 
 
@@ -65,7 +66,11 @@ async def _ensure_test_db(database_url: str, reset: bool = False) -> None:
 
 
 async def _fetch_tables(database_url: str) -> set[str]:
-    engine = create_async_engine(database_url, pool_pre_ping=True)
+    engine = create_async_engine(
+        database_url,
+        pool_pre_ping=True,
+        connect_args={"server_settings": {"timezone": DEFAULT_TIMEZONE_NAME}},
+    )
     async with engine.connect() as connection:
         result = await connection.execute(
             text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
@@ -106,7 +111,11 @@ async def async_session() -> AsyncSession:
     if not database_url:
         raise RuntimeError("DATABASE_URL_TEST is not set.")
 
-    engine = create_async_engine(database_url, pool_pre_ping=True)
+    engine = create_async_engine(
+        database_url,
+        pool_pre_ping=True,
+        connect_args={"server_settings": {"timezone": DEFAULT_TIMEZONE_NAME}},
+    )
     async with engine.begin() as connection:
         table_list = ", ".join(
             f'"{table.name}"' for table in Base.metadata.sorted_tables

@@ -30,6 +30,7 @@
 - `API_TOKEN` (required): bearer token for `/chat`.
 - `SMS_OUTBOUND_URL` (required): webhook endpoint for outbound replies.
 - `SMS_TIMEOUT_SECONDS` (default `15`): outbound HTTP timeout in seconds.
+- Timezone defaults to `EST` (UTC-05:00) for API timestamps and database sessions.
 
 ## Run
 - Local dev:

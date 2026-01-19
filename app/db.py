@@ -10,13 +10,19 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from app.config import DEFAULT_TIMEZONE_NAME
+
 
 @lru_cache
 def get_engine() -> AsyncEngine:
     url = os.getenv("DATABASE_URL")
     if not url:
         raise RuntimeError("DATABASE_URL is not set.")
-    return create_async_engine(url, pool_pre_ping=True)
+    return create_async_engine(
+        url,
+        pool_pre_ping=True,
+        connect_args={"server_settings": {"timezone": DEFAULT_TIMEZONE_NAME}},
+    )
 
 
 def get_sessionmaker() -> async_sessionmaker[AsyncSession]:
