@@ -35,6 +35,49 @@ def get_openai_model() -> str:
     return os.getenv("OPENAI_MODEL", "")
 
 
+# ADMIN_USERNAME: username for SQLAdmin login.
+def get_admin_username() -> str:
+    return os.getenv("ADMIN_USERNAME", "")
+
+
+# ADMIN_PASSWORD: password for SQLAdmin login.
+def get_admin_password() -> str:
+    return os.getenv("ADMIN_PASSWORD", "")
+
+
+# ADMIN_SECRET_KEY: secret for admin sessions.
+def get_admin_secret_key() -> str:
+    return os.getenv("ADMIN_SECRET_KEY", "")
+
+
+# ADMIN_SESSION_TTL_SECONDS: admin session lifetime in seconds.
+def get_admin_session_ttl_seconds() -> int:
+    value = os.getenv("ADMIN_SESSION_TTL_SECONDS")
+    if not value:
+        return 8 * 60 * 60
+    try:
+        parsed = int(value)
+    except ValueError:
+        return 8 * 60 * 60
+    return parsed if parsed >= 300 else 8 * 60 * 60
+
+
+# ADMIN_EXPORT_MAX_ROWS: cap rows in admin exports.
+def get_admin_export_max_rows() -> int:
+    value = os.getenv("ADMIN_EXPORT_MAX_ROWS")
+    if not value:
+        return 10_000
+    try:
+        parsed = int(value)
+    except ValueError:
+        return 10_000
+    return parsed if parsed >= 1 else 10_000
+
+
+def admin_enabled() -> bool:
+    return bool(get_admin_username() and get_admin_password() and get_admin_secret_key())
+
+
 UTTERANCE_STATUS_RECEIVED: Final[Literal["received"]] = "received"
 UTTERANCE_STATUS_QUEUED: Final[Literal["queued"]] = "queued"
 UTTERANCE_STATUS_SENT: Final[Literal["sent"]] = "sent"

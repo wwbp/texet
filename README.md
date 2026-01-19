@@ -32,6 +32,11 @@
 - `SMS_TIMEOUT_SECONDS` (default `15`): outbound HTTP timeout in seconds.
 - `OPENAI_API_KEY` (required): API key for OpenAI.
 - `OPENAI_MODEL` (required): OpenAI model name (example: `gpt-4o-mini`).
+- `ADMIN_USERNAME` (optional): SQLAdmin login username (enables admin UI).
+- `ADMIN_PASSWORD` (optional): SQLAdmin login password.
+- `ADMIN_SECRET_KEY` (optional): session secret for the admin UI.
+- `ADMIN_SESSION_TTL_SECONDS` (default `28800`): admin session TTL in seconds.
+- `ADMIN_EXPORT_MAX_ROWS` (default `10000`): max rows returned per export.
 - Timezone defaults to `EST` (UTC-05:00) for API timestamps and database sessions.
 
 ## Run
@@ -94,6 +99,17 @@
 - Run the end-to-end smoke test:
   - `make smoke`
 - If `SMS_OUTBOUND_URL` is empty, the smoke test expects SMS delivery to fail and will assert failed status counts instead of sent counts.
+
+## Admin Interface
+- Enable the admin UI by setting `ADMIN_USERNAME`, `ADMIN_PASSWORD`, and `ADMIN_SECRET_KEY`.
+- Visit `http://localhost:8000/admin` and sign in with the admin credentials.
+- Admin views are read-only (create/edit/delete disabled) for safety.
+- Admin exports (CSV/JSON) require admin auth and live under `/admin/export`:
+  - `GET /admin/export/utterances?format=csv|json&status=sent&since=2024-01-01T00:00:00Z`
+  - `GET /admin/export/conversations?format=csv|json&status=open`
+  - `GET /admin/export/speakers?format=csv|json`
+- Scripted exports can use HTTP Basic auth (same admin credentials), for example:
+  - `curl -u admin:change_me "http://localhost:8000/admin/export/utterances?format=csv"`
 
 ## Quality Checks
 - Lint:
