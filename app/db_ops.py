@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import hashlib
 from typing import Any
 
 from sqlalchemy import select
@@ -16,21 +17,11 @@ from app.models import Conversation, Speaker, Utterance
 
 
 def bot_speaker_id(user_id: str) -> str:
-    return f"bot:{user_id}"
-
-
-def _validate_utterance_status(status: str) -> None:
-    if status not in UTTERANCE_STATUSES:
-        raise ValueError(f"Invalid utterance status: {status}")
-
-
-async def _get_conversation(
-    session: AsyncSession, conversation_id: str
-) -> Conversation:
-    conversation = await session.get(Conversation, conversation_id)
-    if not conversation:
-        raise ValueError("Conversation not found for utterance.")
-    return conversation
+    prefix = "bot:"
+    if len(user_id) <= 128 - len(prefix):
+        return f"{prefix}{user_id}"
+    digest = hashlib.sha256(user_id.encode("utf-8")).hexdigest()
+    return f"{prefix}{digest}"
 
 
 async def get_or_create_speaker(
@@ -42,9 +33,18 @@ async def get_or_create_speaker(
     if speaker:
         return speaker
 
-    speaker = Speaker(id=speaker_id, meta=meta)
-    session.add(speaker)
-    await session.flush()
+    try:
+        async with session.begin_nested():
+            speaker = Speaker(id=speaker_id, meta=meta)
+            session.add(speaker)
+            await session.flush()
+            return speaker
+    except IntegrityError:
+        pass
+
+    speaker = await session.get(Speaker, speaker_id)
+    if not speaker:
+        raise RuntimeError("Failed to create or fetch speaker.")
     return speaker
 
 
@@ -123,9 +123,12 @@ async def create_utterance(
 ) -> Utterance:
     if text is None:
         raise ValueError("Utterance text is required.")
-    _validate_utterance_status(status)
+    if status not in UTTERANCE_STATUSES:
+        raise ValueError(f"Invalid utterance status: {status}")
     now = datetime.datetime.now(datetime.UTC)
-    conversation = await _get_conversation(session, conversation_id)
+    conversation = await session.get(Conversation, conversation_id)
+    if not conversation:
+        raise ValueError("Conversation not found for utterance.")
 
     utterance = Utterance(
         conversation_id=conversation_id,
@@ -144,16 +147,17 @@ async def create_utterance(
     return utterance
 
 
-async def create_pending_utterance(
+async def create_queued_utterance(
     session: AsyncSession,
     conversation_id: str,
     speaker_id: str,
     reply_to_id: str | None = None,
     meta: dict[str, Any] | None = None,
 ) -> Utterance:
-    _validate_utterance_status(UTTERANCE_STATUS_QUEUED)
     now = datetime.datetime.now(datetime.UTC)
-    conversation = await _get_conversation(session, conversation_id)
+    conversation = await session.get(Conversation, conversation_id)
+    if not conversation:
+        raise ValueError("Conversation not found for utterance.")
 
     utterance = Utterance(
         conversation_id=conversation_id,

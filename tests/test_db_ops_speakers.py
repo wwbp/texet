@@ -33,3 +33,11 @@ async def test_get_or_create_bot_speaker(async_session: AsyncSession) -> None:
     assert fetched is not None
     assert fetched.id == bot.id
     assert fetched.meta == {"type": "bot"}
+
+
+def test_bot_speaker_id_hashes_long_user_id() -> None:
+    user_id = "u" * 128
+    bot_id = bot_speaker_id(user_id)
+    assert bot_id.startswith("bot:")
+    assert len(bot_id) <= 128
+    assert bot_id != f"bot:{user_id}"

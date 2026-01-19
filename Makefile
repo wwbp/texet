@@ -11,7 +11,6 @@ test:
 	docker compose run --rm --build api uv run pytest --cov
 
 clean:
-	$(MAKE) check
 	docker compose run --rm --build api uv run ruff check .
 	docker compose run --rm --build api uv run ruff format .
 	docker compose run --rm --build api uv run mypy
@@ -28,7 +27,7 @@ migrate:
 
 check:
 	@services="$$(docker compose ps --status running --services)"; \
-	echo "$$services" | grep -qx "api" && echo "$$services" | grep -qx "db" || { \
-		echo "Services not running. Run 'make start' first."; \
+	echo "$$services" | grep -qx "db" || { \
+		echo "Database not running. Run 'make start' or 'docker compose up -d db' first."; \
 		exit 1; \
 	}

@@ -11,16 +11,12 @@ from sqlalchemy.ext.asyncio import (
 )
 
 
-def _get_database_url() -> str:
+@lru_cache
+def get_engine() -> AsyncEngine:
     url = os.getenv("DATABASE_URL")
     if not url:
         raise RuntimeError("DATABASE_URL is not set.")
-    return url
-
-
-@lru_cache
-def get_engine() -> AsyncEngine:
-    return create_async_engine(_get_database_url(), pool_pre_ping=True)
+    return create_async_engine(url, pool_pre_ping=True)
 
 
 def get_sessionmaker() -> async_sessionmaker[AsyncSession]:

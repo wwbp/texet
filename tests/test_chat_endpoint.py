@@ -36,10 +36,10 @@ async def async_client(
 def sms_outbox(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, str]]:
     outbox: list[dict[str, str]] = []
 
-    async def _fake_send_sms(payload: chat_service.SmsOutboundRequest) -> None:
-        outbox.append(payload.model_dump())
+    async def _fake_send_sms(user_id: str, message: str) -> None:
+        outbox.append({"user_id": user_id, "message": message})
 
-    monkeypatch.setattr(chat_service, "send_sms", _fake_send_sms)
+    monkeypatch.setattr(chat_service, "_send_sms", _fake_send_sms)
     return outbox
 
 
@@ -60,6 +60,36 @@ async def test_chat_validates_payload(async_client: AsyncClient) -> None:
         json={"user_id": "u1"},
     )
     assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_chat_allows_empty_message(
+    async_client: AsyncClient, sms_outbox: list[dict[str, str]]
+) -> None:
+    response = await async_client.post(
+        "/chat",
+        headers={"Authorization": "Bearer test-token"},
+        json={"user_id": "u-empty", "message": ""},
+    )
+    assert response.status_code == 202
+    assert sms_outbox == [{"user_id": "u-empty", "message": "echo:"}]
+
+
+@pytest.mark.asyncio
+async def test_chat_allows_large_message(
+    async_client: AsyncClient, sms_outbox: list[dict[str, str]]
+) -> None:
+    message = "a" * 10_000
+    response = await async_client.post(
+        "/chat",
+        headers={"Authorization": "Bearer test-token"},
+        json={"user_id": "u-large", "message": message},
+    )
+    assert response.status_code == 202
+    assert len(sms_outbox) == 1
+    assert sms_outbox[0]["user_id"] == "u-large"
+    assert sms_outbox[0]["message"].startswith("echo:")
+    assert len(sms_outbox[0]["message"]) == len(message) + 5
 
 
 @pytest.mark.asyncio
@@ -203,10 +233,10 @@ async def test_chat_marks_failed_on_sms_error(
     async_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def _fail_send_sms(_: chat_service.SmsOutboundRequest) -> None:
+    async def _fail_send_sms(user_id: str, message: str) -> None:
         raise RuntimeError("sms gateway down")
 
-    monkeypatch.setattr(chat_service, "send_sms", _fail_send_sms)
+    monkeypatch.setattr(chat_service, "_send_sms", _fail_send_sms)
 
     payload = {"user_id": "u9", "message": "hello"}
     response = await async_client.post(

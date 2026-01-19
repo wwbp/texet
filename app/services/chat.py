@@ -1,3 +1,4 @@
+import httpx
 from fastapi import BackgroundTasks
 from sqlalchemy.ext.asyncio import (
     AsyncConnection,
@@ -7,94 +8,37 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from app.config import (
-    MESSAGE_MAX_LENGTH,
-    MESSAGE_MIN_LENGTH,
     UTTERANCE_STATUS_FAILED,
     UTTERANCE_STATUS_QUEUED,
     UTTERANCE_STATUS_RECEIVED,
     UTTERANCE_STATUS_SENT,
+    get_sms_outbound_url,
+    get_sms_timeout_seconds,
 )
 from app.db import get_sessionmaker
 from app.db_ops import (
-    create_pending_utterance,
+    create_queued_utterance,
     create_utterance,
     get_or_create_bot_speaker,
     get_or_create_conversation,
     get_or_create_speaker,
 )
 from app.models import Utterance
-from app.schemas import ChatQueuedResponse, ChatRequest, SmsOutboundRequest
-from app.services.sms import send_sms
-
-ERROR_MAX_CHARS = 500
-
-
-def _ingest_message(message: str) -> str:
-    return message.strip()
+from app.schemas import ChatQueuedResponse, ChatRequest
 
 
 async def _generate_reply(message: str) -> str:
     return f"echo:{message}"
 
 
-def _contribute_reply(message: str) -> str:
-    return message.strip()
-
-
-def _qa_reply(message: str) -> str:
-    if len(message) < MESSAGE_MIN_LENGTH:
-        raise ValueError("Reply is empty.")
-    if len(message) > MESSAGE_MAX_LENGTH:
-        raise ValueError(f"Reply exceeds {MESSAGE_MAX_LENGTH} characters.")
-    return message
-
-
-async def _run_pipeline(message: str) -> str:
-    try:
-        ingested = _ingest_message(message)
-    except Exception as exc:
-        raise RuntimeError(f"pipeline:ingest failed: {exc}") from exc
-
-    try:
-        generated = await _generate_reply(ingested)
-    except Exception as exc:
-        raise RuntimeError(f"pipeline:generate failed: {exc}") from exc
-
-    try:
-        contributed = _contribute_reply(generated)
-    except Exception as exc:
-        raise RuntimeError(f"pipeline:contribute failed: {exc}") from exc
-
-    try:
-        validated = _qa_reply(contributed)
-    except Exception as exc:
-        raise RuntimeError(f"pipeline:qa failed: {exc}") from exc
-
-    return validated
-
-
-def _format_error(exc: Exception) -> str:
-    message = str(exc).strip() or exc.__class__.__name__
-    return message[:ERROR_MAX_CHARS]
-
-
-async def _fetch_utterance(session: AsyncSession, utterance_id: str) -> Utterance:
-    utterance = await session.get(Utterance, utterance_id)
-    if not utterance:
-        raise RuntimeError(f"Utterance not found: {utterance_id}")
-    return utterance
-
-
-def _background_sessionmaker(
-    session: AsyncSession,
-) -> async_sessionmaker[AsyncSession]:
-    bind = session.bind
-    if bind is None:
-        return get_sessionmaker()
-    engine = bind.engine if isinstance(bind, AsyncConnection) else bind
-    if not isinstance(engine, AsyncEngine):
-        return get_sessionmaker()
-    return async_sessionmaker(engine, expire_on_commit=False)
+async def _send_sms(user_id: str, message: str) -> None:
+    url = get_sms_outbound_url()
+    if not url:
+        raise RuntimeError("SMS_OUTBOUND_URL is not set.")
+    timeout = get_sms_timeout_seconds()
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.post(url, json={"user_id": user_id, "message": message})
+        response.raise_for_status()
 
 
 async def _run_deferred_reply(
@@ -105,30 +49,30 @@ async def _run_deferred_reply(
 ) -> None:
     async with sessionmaker() as session:
         try:
-            user_utterance = await _fetch_utterance(session, user_utterance_id)
-            if not user_utterance.text:
+            user_utterance = await session.get(Utterance, user_utterance_id)
+            if not user_utterance or user_utterance.text is None:
                 raise RuntimeError("User utterance text missing.")
 
-            reply_text = await _run_pipeline(user_utterance.text)
+            reply_text = await _generate_reply(user_utterance.text)
 
-            bot_utterance = await _fetch_utterance(session, bot_utterance_id)
+            bot_utterance = await session.get(Utterance, bot_utterance_id)
+            if not bot_utterance:
+                raise RuntimeError(f"Utterance not found: {bot_utterance_id}")
             bot_utterance.text = reply_text
-            bot_utterance.status = UTTERANCE_STATUS_QUEUED
             bot_utterance.error = None
             await session.commit()
 
-            outbound = SmsOutboundRequest(user_id=user_id, message=reply_text)
-            await send_sms(outbound)
+            await _send_sms(user_id, reply_text)
 
             bot_utterance.status = UTTERANCE_STATUS_SENT
-            bot_utterance.error = None
             await session.commit()
         except Exception as exc:
             await session.rollback()
             failed_utterance = await session.get(Utterance, bot_utterance_id)
             if failed_utterance:
+                message = str(exc).strip() or exc.__class__.__name__
                 failed_utterance.status = UTTERANCE_STATUS_FAILED
-                failed_utterance.error = _format_error(exc)
+                failed_utterance.error = message[:500]
                 await session.commit()
 
 
@@ -153,14 +97,23 @@ async def process_chat(
             status=UTTERANCE_STATUS_RECEIVED,
         )
 
-        bot_utterance = await create_pending_utterance(
+        bot_utterance = await create_queued_utterance(
             session,
             conversation.id,
             bot.id,
             reply_to_id=user_utterance.id,
         )
 
-    sessionmaker = _background_sessionmaker(session)
+    bind = session.bind
+    if bind is None:
+        sessionmaker = get_sessionmaker()
+    else:
+        engine = bind.engine if isinstance(bind, AsyncConnection) else bind
+        sessionmaker = (
+            async_sessionmaker(engine, expire_on_commit=False)
+            if isinstance(engine, AsyncEngine)
+            else get_sessionmaker()
+        )
     background_tasks.add_task(
         _run_deferred_reply,
         payload.user_id,

@@ -29,9 +29,7 @@
 - Centralized config lives in `app/config.py`.
 - `API_TOKEN` (required): bearer token for `/chat`.
 - `SMS_OUTBOUND_URL` (required): webhook endpoint for outbound replies.
-- `SMS_TIMEOUT_SECONDS` (default `10`): outbound HTTP timeout in seconds.
-- `MESSAGE_MIN_LENGTH` (default `1`): minimum characters for inbound/outbound message.
-- `MESSAGE_MAX_LENGTH` (default `4000`): maximum characters for inbound/outbound message.
+- `SMS_TIMEOUT_SECONDS` (default `15`): outbound HTTP timeout in seconds.
 
 ## Run
 - Local dev:
@@ -63,7 +61,7 @@
 
 ## LLM Integration
 - Background task pipeline is stubbed (echo response).
-  - Stages: ingest → generate → contribute → qa (length validation).
+  - Stage: generate.
 
 ## Dependencies
 - Add a package:
@@ -100,10 +98,10 @@
 ## Make Targets
 - `make start` builds and starts the stack.
 - `make stop` stops and removes the stack (including volumes).
-- `make test` runs the full test suite with coverage (requires `make start` first).
-- `make clean` runs linting, formatting, type checks, and vulnerability audit (requires `make start` first).
-- `make migration name=...` creates a new Alembic revision (requires `make start` first).
-- `make migrate` applies Alembic migrations (requires `make start` first).
+- `make test` runs the full test suite with coverage (requires the DB running via `make start` or `docker compose up -d db`).
+- `make clean` runs linting, formatting, type checks, and vulnerability audit.
+- `make migration name=...` creates a new Alembic revision (requires the DB running).
+- `make migrate` applies Alembic migrations (requires the DB running).
 
 ## Notes
 - 

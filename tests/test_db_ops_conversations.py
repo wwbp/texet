@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import UTTERANCE_STATUS_QUEUED, UTTERANCE_STATUS_RECEIVED
 from app.db_ops import (
     create_conversation,
-    create_pending_utterance,
+    create_queued_utterance,
     create_utterance,
     get_or_create_conversation,
     get_or_create_speaker,
@@ -85,14 +85,53 @@ async def test_create_utterance_updates_activity(async_session: AsyncSession) ->
 
 
 @pytest.mark.asyncio
-async def test_create_pending_utterance(async_session: AsyncSession) -> None:
+async def test_create_utterance_rejects_none_text(
+    async_session: AsyncSession,
+) -> None:
     speaker = await get_or_create_speaker(
         async_session, "user-1", meta={"type": "user"}
     )
     conversation = await create_conversation(async_session, speaker.id)
     await async_session.commit()
 
-    pending = await create_pending_utterance(
+    with pytest.raises(ValueError, match="Utterance text is required."):
+        await create_utterance(  # type: ignore[arg-type]
+            async_session,
+            conversation.id,
+            speaker.id,
+            None,
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_utterance_rejects_invalid_status(
+    async_session: AsyncSession,
+) -> None:
+    speaker = await get_or_create_speaker(
+        async_session, "user-1", meta={"type": "user"}
+    )
+    conversation = await create_conversation(async_session, speaker.id)
+    await async_session.commit()
+
+    with pytest.raises(ValueError, match="Invalid utterance status"):
+        await create_utterance(
+            async_session,
+            conversation.id,
+            speaker.id,
+            "hello",
+            status="bogus",
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_queued_utterance(async_session: AsyncSession) -> None:
+    speaker = await get_or_create_speaker(
+        async_session, "user-1", meta={"type": "user"}
+    )
+    conversation = await create_conversation(async_session, speaker.id)
+    await async_session.commit()
+
+    queued = await create_queued_utterance(
         async_session,
         conversation.id,
         speaker.id,
@@ -100,8 +139,25 @@ async def test_create_pending_utterance(async_session: AsyncSession) -> None:
     )
     await async_session.commit()
 
-    fetched = await async_session.get(Utterance, pending.id)
+    fetched = await async_session.get(Utterance, queued.id)
     assert fetched is not None
     assert fetched.status == UTTERANCE_STATUS_QUEUED
     assert fetched.text is None
     assert fetched.error is None
+
+
+@pytest.mark.asyncio
+async def test_create_queued_utterance_requires_conversation(
+    async_session: AsyncSession,
+) -> None:
+    speaker = await get_or_create_speaker(
+        async_session, "user-1", meta={"type": "user"}
+    )
+    await async_session.commit()
+
+    with pytest.raises(ValueError, match="Conversation not found"):
+        await create_queued_utterance(
+            async_session,
+            "missing",
+            speaker.id,
+        )
