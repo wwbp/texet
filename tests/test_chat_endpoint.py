@@ -5,15 +5,16 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import chat as chat_service
 from app.config import (
     UTTERANCE_STATUS_FAILED,
     UTTERANCE_STATUS_RECEIVED,
     UTTERANCE_STATUS_SENT,
 )
 from app.db import get_async_session
+from app.db_ops import DEFAULT_SYSTEM_PROMPT
 from app.main import app
 from app.models import Conversation, Speaker, Utterance
-from app.services import chat as chat_service
 
 
 @pytest.fixture()
@@ -21,6 +22,8 @@ async def async_client(
     async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> AsyncClient:
     monkeypatch.setenv("API_TOKEN", "test-token")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+    monkeypatch.setenv("OPENAI_MODEL", "gpt-4o-mini")
 
     async def _override_dependency() -> AsyncGenerator[AsyncSession, None]:
         yield async_session
@@ -41,6 +44,26 @@ def sms_outbox(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, str]]:
 
     monkeypatch.setattr(chat_service, "_send_sms", _fake_send_sms)
     return outbox
+
+
+@pytest.fixture(autouse=True)
+def kani_stub(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
+    calls: list[dict[str, object]] = []
+
+    async def _fake_generate_reply(
+        chat_history: list[object], query: str, system_prompt: str
+    ) -> str:
+        calls.append(
+            {
+                "query": query,
+                "history_len": len(chat_history),
+                "system_prompt": system_prompt,
+            }
+        )
+        return f"reply:{query}"
+
+    monkeypatch.setattr(chat_service, "_generate_reply", _fake_generate_reply)
+    return calls
 
 
 @pytest.mark.asyncio
@@ -72,7 +95,7 @@ async def test_chat_allows_empty_message(
         json={"user_id": "u-empty", "message": ""},
     )
     assert response.status_code == 202
-    assert sms_outbox == [{"user_id": "u-empty", "message": "echo:"}]
+    assert sms_outbox == [{"user_id": "u-empty", "message": "reply:"}]
 
 
 @pytest.mark.asyncio
@@ -88,8 +111,8 @@ async def test_chat_allows_large_message(
     assert response.status_code == 202
     assert len(sms_outbox) == 1
     assert sms_outbox[0]["user_id"] == "u-large"
-    assert sms_outbox[0]["message"].startswith("echo:")
-    assert len(sms_outbox[0]["message"]) == len(message) + 5
+    assert sms_outbox[0]["message"].startswith("reply:")
+    assert len(sms_outbox[0]["message"]) == len(message) + 6
 
 
 @pytest.mark.asyncio
@@ -97,6 +120,7 @@ async def test_chat_success_persists(
     async_client: AsyncClient,
     async_session: AsyncSession,
     sms_outbox: list[dict[str, str]],
+    kani_stub: list[dict[str, object]],
 ) -> None:
     payload = {"user_id": "u1", "message": "hello"}
     first = await async_client.post(
@@ -123,8 +147,9 @@ async def test_chat_success_persists(
     assert second_body["conversation_id"] == first_body["conversation_id"]
 
     assert len(sms_outbox) == 2
-    assert sms_outbox[0] == {"user_id": "u1", "message": "echo:hello"}
-    assert sms_outbox[1] == {"user_id": "u1", "message": "echo:again"}
+    assert sms_outbox[0] == {"user_id": "u1", "message": "reply:hello"}
+    assert sms_outbox[1] == {"user_id": "u1", "message": "reply:again"}
+    assert kani_stub[-1]["system_prompt"] == DEFAULT_SYSTEM_PROMPT
 
     async_session.expire_all()
     speaker_count = await async_session.execute(
@@ -225,6 +250,36 @@ async def test_chat_multiple_users_interleaved(
         conversation_ids["u2"]: 10,
         conversation_ids["u3"]: 14,
     }
+
+
+@pytest.mark.asyncio
+async def test_chat_marks_failed_on_generation_error(
+    async_client: AsyncClient,
+    async_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _fail_generate_reply(
+        chat_history: list[object], query: str, system_prompt: str
+    ) -> str:
+        raise RuntimeError("kani down")
+
+    monkeypatch.setattr(chat_service, "_generate_reply", _fail_generate_reply)
+
+    payload = {"user_id": "u8", "message": "hello"}
+    response = await async_client.post(
+        "/chat",
+        headers={"Authorization": "Bearer test-token"},
+        json=payload,
+    )
+    assert response.status_code == 202
+
+    async_session.expire_all()
+    result = await async_session.execute(
+        select(Utterance).where(Utterance.speaker_id.like("bot:%"))
+    )
+    bot_utterance = result.scalar_one()
+    assert bot_utterance.status == UTTERANCE_STATUS_FAILED
+    assert bot_utterance.error is not None
 
 
 @pytest.mark.asyncio

@@ -4,6 +4,7 @@ import datetime
 import hashlib
 from typing import Any
 
+from kani import ChatMessage  # type: ignore[import-untyped]
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +16,8 @@ from app.config import (
     UTTERANCE_STATUSES,
 )
 from app.models import Conversation, Speaker, Utterance
+
+DEFAULT_SYSTEM_PROMPT = "you are a helful assistant."
 
 
 def bot_speaker_id(user_id: str) -> str:
@@ -110,6 +113,56 @@ async def get_or_create_conversation(
     if not conversation:
         raise RuntimeError("Failed to create or fetch conversation.")
     return conversation
+
+
+async def get_or_create_system_prompt(
+    session: AsyncSession, conversation_id: str
+) -> str:
+    conversation = await session.get(Conversation, conversation_id)
+    if not conversation:
+        raise ValueError("Conversation not found for system prompt.")
+
+    meta = conversation.meta or {}
+    prompt = meta.get("system_prompt")
+    if isinstance(prompt, str) and prompt.strip():
+        return prompt
+
+    meta = dict(meta)
+    meta["system_prompt"] = DEFAULT_SYSTEM_PROMPT
+    conversation.meta = meta
+    await session.flush()
+    return DEFAULT_SYSTEM_PROMPT
+
+
+async def build_chat_history(
+    session: AsyncSession,
+    conversation_id: str,
+    user_id: str,
+    up_to_timestamp: datetime.datetime,
+    exclude_utterance_id: str | None = None,
+) -> list[ChatMessage]:
+    result = await session.execute(
+        select(Utterance)
+        .where(
+            Utterance.conversation_id == conversation_id,
+            Utterance.timestamp <= up_to_timestamp,
+        )
+        .order_by(Utterance.timestamp)
+    )
+    utterances = result.scalars().all()
+
+    bot_id = bot_speaker_id(user_id)
+    chat_history: list[ChatMessage] = []
+    for utterance in utterances:
+        if exclude_utterance_id and utterance.id == exclude_utterance_id:
+            continue
+        if not utterance.text:
+            continue
+        if utterance.speaker_id == bot_id:
+            chat_history.append(ChatMessage.assistant(utterance.text))
+        else:
+            chat_history.append(ChatMessage.user(utterance.text))
+    return chat_history
 
 
 async def create_utterance(

@@ -1,5 +1,9 @@
+from typing import cast
+
 import httpx
 from fastapi import BackgroundTasks
+from kani import ChatMessage, Kani  # type: ignore[import-untyped]
+from kani.engines.openai import OpenAIEngine  # type: ignore[import-untyped]
 from sqlalchemy.ext.asyncio import (
     AsyncConnection,
     AsyncEngine,
@@ -12,23 +16,49 @@ from app.config import (
     UTTERANCE_STATUS_QUEUED,
     UTTERANCE_STATUS_RECEIVED,
     UTTERANCE_STATUS_SENT,
+    get_openai_api_key,
+    get_openai_model,
     get_sms_outbound_url,
     get_sms_timeout_seconds,
 )
 from app.db import get_sessionmaker
 from app.db_ops import (
+    build_chat_history,
     create_queued_utterance,
     create_utterance,
     get_or_create_bot_speaker,
     get_or_create_conversation,
     get_or_create_speaker,
+    get_or_create_system_prompt,
 )
 from app.models import Utterance
 from app.schemas import ChatQueuedResponse, ChatRequest
 
 
-async def _generate_reply(message: str) -> str:
-    return f"echo:{message}"
+async def _generate_reply(
+    chat_history: list[ChatMessage], query: str, system_prompt: str
+) -> str:
+    api_key = get_openai_api_key()
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY is not set.")
+    model = get_openai_model()
+    if not model:
+        raise RuntimeError("OPENAI_MODEL is not set.")
+
+    engine = OpenAIEngine(api_key=api_key, model=model)
+    kani = Kani(engine=engine, system_prompt=system_prompt)
+    kani.chat_history = chat_history
+
+    try:
+        reply = await kani.chat_round(query)
+    except Exception as exc:
+        raise RuntimeError(f"Kani generation failed: {exc}") from exc
+    finally:
+        await engine.close()
+
+    if not reply.text:
+        raise RuntimeError("Kani reply was empty.")
+    return cast(str, reply.text)
 
 
 async def _send_sms(user_id: str, message: str) -> None:
@@ -53,7 +83,20 @@ async def _run_deferred_reply(
             if not user_utterance or user_utterance.text is None:
                 raise RuntimeError("User utterance text missing.")
 
-            reply_text = await _generate_reply(user_utterance.text)
+            chat_history = await build_chat_history(
+                session,
+                conversation_id=user_utterance.conversation_id,
+                user_id=user_id,
+                up_to_timestamp=user_utterance.timestamp,
+                exclude_utterance_id=user_utterance.id,
+            )
+
+            system_prompt = await get_or_create_system_prompt(
+                session, user_utterance.conversation_id
+            )
+            reply_text = await _generate_reply(
+                chat_history, user_utterance.text, system_prompt
+            )
 
             bot_utterance = await session.get(Utterance, bot_utterance_id)
             if not bot_utterance:

@@ -5,10 +5,10 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_auth
+from app.chat import process_chat
 from app.config import DEFAULT_TIMEZONE
 from app.db import get_async_session, ping_db
 from app.schemas import ChatQueuedResponse, ChatRequest
-from app.services.chat import process_chat
 
 app = FastAPI(
     title="Texet API",

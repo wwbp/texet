@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.config import DEFAULT_TIMEZONE_NAME
 
+
 @pytest.mark.asyncio
 async def test_db_connection() -> None:
     database_url = os.getenv("DATABASE_URL_TEST")

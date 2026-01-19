@@ -30,6 +30,8 @@
 - `API_TOKEN` (required): bearer token for `/chat`.
 - `SMS_OUTBOUND_URL` (required): webhook endpoint for outbound replies.
 - `SMS_TIMEOUT_SECONDS` (default `15`): outbound HTTP timeout in seconds.
+- `OPENAI_API_KEY` (required): API key for OpenAI.
+- `OPENAI_MODEL` (required): OpenAI model name (example: `gpt-4o-mini`).
 - Timezone defaults to `EST` (UTC-05:00) for API timestamps and database sessions.
 
 ## Run
@@ -61,8 +63,9 @@
 - If running locally (outside Docker), set `DATABASE_URL` before running Alembic.
 
 ## LLM Integration
-- Background task pipeline is stubbed (echo response).
-  - Stage: generate.
+- Background task pipeline uses Kani with OpenAI for reply generation.
+  - Requires `OPENAI_API_KEY` and `OPENAI_MODEL`.
+  - Failures mark the reply utterance as `failed` with an error message.
 
 ## Dependencies
 - Add a package:
@@ -83,6 +86,14 @@
   - `uv run pytest --cov`
 - Run all tests with coverage (Docker):
   - `docker compose run --rm api uv run pytest --cov`
+
+## Smoke Test
+- Start the stack and apply migrations first:
+  - `make start`
+  - `make migrate`
+- Run the end-to-end smoke test:
+  - `make smoke`
+- If `SMS_OUTBOUND_URL` is empty, the smoke test expects SMS delivery to fail and will assert failed status counts instead of sent counts.
 
 ## Quality Checks
 - Lint:

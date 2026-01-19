@@ -25,6 +25,16 @@ def get_sms_timeout_seconds() -> float:
     return parsed if parsed >= 0.1 else 15.0
 
 
+# OPENAI_API_KEY: API key for OpenAI.
+def get_openai_api_key() -> str:
+    return os.getenv("OPENAI_API_KEY", "")
+
+
+# OPENAI_MODEL: OpenAI model name.
+def get_openai_model() -> str:
+    return os.getenv("OPENAI_MODEL", "")
+
+
 UTTERANCE_STATUS_RECEIVED: Final[Literal["received"]] = "received"
 UTTERANCE_STATUS_QUEUED: Final[Literal["queued"]] = "queued"
 UTTERANCE_STATUS_SENT: Final[Literal["sent"]] = "sent"

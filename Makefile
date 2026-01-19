@@ -1,4 +1,4 @@
-.PHONY: start stop test clean check migration migrate
+.PHONY: start stop test clean check migration migrate smoke
 
 start:
 	docker compose up --build -d
@@ -24,6 +24,9 @@ migration:
 migrate:
 	$(MAKE) check
 	docker compose run --rm --build -v $(CURDIR):/app api alembic upgrade head
+
+smoke:
+	bash scripts/e2e_smoke.sh
 
 check:
 	@services="$$(docker compose ps --status running --services)"; \
