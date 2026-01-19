@@ -104,4 +104,4 @@
 - `make migrate` applies Alembic migrations (requires the DB running).
 
 ## Notes
-- 
+- Model schema informed by ConvoKit: https://convokit.cornell.edu/
