@@ -16,7 +16,10 @@ COPY tests /app/tests
 COPY pytest.ini /app/pytest.ini
 COPY alembic /app/alembic
 COPY alembic.ini /app/alembic.ini
+COPY scripts/docker-entrypoint.sh /app/scripts/docker-entrypoint.sh
+RUN chmod +x /app/scripts/docker-entrypoint.sh
 
 EXPOSE 8000
 
+ENTRYPOINT ["/app/scripts/docker-entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
