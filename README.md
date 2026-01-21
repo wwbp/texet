@@ -143,6 +143,7 @@ Optional: local Python dev outside Docker. If you are just validating the projec
   ```bash
   uv sync
   ```
+
 - Run locally:
 
   ```bash
@@ -156,6 +157,7 @@ Optional: local Python dev outside Docker. If you are just validating the projec
   ```bash
   uv add <package>
   ```
+
 - Upgrade a package:
 
   ```bash
@@ -172,11 +174,13 @@ Optional: local Python dev outside Docker. If you are just validating the projec
   ```bash
   make migration name=add_speakers
   ```
+
 - Apply migrations:
 
   ```bash
   make migrate
   ```
+
 - If running locally (outside Docker), set `DATABASE_URL` before running Alembic.
 
 ### LLM integration
@@ -192,6 +196,7 @@ Optional: local Python dev outside Docker. If you are just validating the projec
   ```bash
   make test
   ```
+
 - Requires the DB running via `make start`.
 - Uses the `texet_test` database and applies Alembic migrations before running.
 - See `Makefile` for the exact commands.
@@ -204,11 +209,13 @@ Optional: local Python dev outside Docker. If you are just validating the projec
   make start
   make migrate
   ```
+
 - Run the end-to-end smoke test:
 
   ```bash
   make smoke
   ```
+
 - If `SMS_OUTBOUND_URL` is empty, the smoke test expects SMS delivery to fail and will assert failed status counts instead of sent counts.
 
 ### Quality checks
@@ -218,6 +225,7 @@ Optional: local Python dev outside Docker. If you are just validating the projec
   ```bash
   make clean
   ```
+
 - See `Makefile` for the exact commands.
 
 ### Make targets
