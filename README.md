@@ -34,6 +34,8 @@ This README uses `make` targets for consistency; see `Makefile` for what each ta
    - `API_TOKEN` to any random string you will use in requests.
    - `OPENAI_API_KEY` and `OPENAI_MODEL` (example: `gpt-4o-mini`).
    - `SMS_OUTBOUND_URL` to your SMS webhook endpoint (for testing, a request bin works).
+   - If you change DB creds in `.env.db`, update `DATABASE_URL` and `DATABASE_URL_TEST`
+     in `.env.api` to match.
 
 3) Start the stack:
 
@@ -107,6 +109,7 @@ curl -H "Authorization: Bearer <API_TOKEN>" \
 
 Required for chat:
 
+- `DATABASE_URL` - async SQLAlchemy URL for the app database.
 - `API_TOKEN` - bearer token for `/chat`.
 - `OPENAI_API_KEY` - OpenAI API key.
 - `OPENAI_MODEL` - model name.
@@ -118,6 +121,10 @@ Optional:
 - `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_SECRET_KEY` - enable admin UI.
 - `ADMIN_SESSION_TTL_SECONDS` - session TTL in seconds (default `28800`).
 - `ADMIN_EXPORT_MAX_ROWS` - max rows per export (default `10000`).
+
+Testing:
+
+- `DATABASE_URL_TEST` - async SQLAlchemy URL for the test database (pytest).
 
 Timezone:
 

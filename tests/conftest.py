@@ -34,6 +34,7 @@ def _load_env_file(path: Path) -> None:
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
+_load_env_file(PROJECT_ROOT / ".env.api")
 _load_env_file(PROJECT_ROOT / ".env.db")
 
 

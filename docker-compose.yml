@@ -4,7 +4,6 @@ services:
       context: .
       dockerfile: Dockerfile
     env_file:
-      - .env.db
       - .env.api
     ports:
       - "8000:8000"
