@@ -1,9 +1,5 @@
 # AWS Staging Setup (Elastic Beanstalk + RDS)
 
-## Who this is for
-This is a white-glove, step-by-step guide for setting up a staging version of the Texet API on AWS.
-It is written for non-technical readers who can follow checklists and copy/paste commands.
-
 ## What you will end up with
 - A staging API on AWS Elastic Beanstalk.
 - A PostgreSQL database on Amazon RDS.
