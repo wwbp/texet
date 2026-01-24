@@ -3,14 +3,14 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, status
+from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.admin import init_admin
-from app.admin import router as admin_router
+from app.console import console_router, init_console
 from app.auth import require_auth
-from app.chat import process_chat
+from app.response import process_response
 from app.config import (
     DEFAULT_TIMEZONE,
     admin_enabled,
@@ -18,12 +18,12 @@ from app.config import (
     get_admin_session_ttl_seconds,
 )
 from app.db import get_async_session, ping_db
-from app.schemas import ChatQueuedResponse, ChatRequest
+from app.response.schemas import ResponseQueuedResponse, ResponseRequest
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    init_admin(app)
+    init_console(app)
     yield
 
 
@@ -32,7 +32,32 @@ app = FastAPI(
     version="0.1.0",
     description="Base API scaffold for Texet.",
     lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
 )
+
+VISIBLE_OPENAPI_PATHS = {"/response", "/health", "/db/health"}
+
+
+def custom_openapi() -> dict[str, object]:
+    if app.openapi_schema:
+        return app.openapi_schema
+    schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+    paths = schema.get("paths", {})
+    schema["paths"] = {
+        path: value for path, value in paths.items() if path in VISIBLE_OPENAPI_PATHS
+    }
+    app.openapi_schema = schema
+    return schema
+
+
+app.openapi = custom_openapi  # type: ignore[method-assign]
 
 if admin_enabled():
     admin_secret = get_admin_secret_key()
@@ -44,21 +69,21 @@ if admin_enabled():
             same_site="lax",
         )
 
-app.include_router(admin_router)
+app.include_router(console_router)
 
 
 @app.post(
-    "/chat",
-    response_model=ChatQueuedResponse,
+    "/response",
+    response_model=ResponseQueuedResponse,
     status_code=status.HTTP_202_ACCEPTED,
     dependencies=[Depends(require_auth)],
 )
-async def chat(
-    payload: ChatRequest,
+async def response(
+    payload: ResponseRequest,
     background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_async_session),
-) -> ChatQueuedResponse:
-    return await process_chat(session, payload, background_tasks)
+) -> ResponseQueuedResponse:
+    return await process_response(session, payload, background_tasks)
 
 
 @app.get("/", response_class=JSONResponse)

@@ -5,7 +5,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from app.admin import init_admin
+from app.console import init_console
 from app.db import get_engine
 
 
@@ -33,7 +33,7 @@ def admin_ui_env() -> None:
 async def admin_ui_client(admin_ui_env: None) -> AsyncClient:
     get_engine.cache_clear()
     test_app = FastAPI()
-    init_admin(test_app)
+    init_console(test_app)
     transport = ASGITransport(app=test_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
@@ -45,18 +45,18 @@ async def admin_ui_client(admin_ui_env: None) -> AsyncClient:
 
 @pytest.mark.asyncio
 async def test_admin_ui_redirects_without_auth(admin_ui_client: AsyncClient) -> None:
-    response = await admin_ui_client.get("/admin/")
+    response = await admin_ui_client.get("/console/admin/")
     assert response.status_code in (302, 307)
-    assert "/admin/login" in response.headers.get("location", "")
+    assert "/console/admin/login" in response.headers.get("location", "")
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "path",
     [
-        "/admin/speaker/list",
-        "/admin/conversation/list",
-        "/admin/utterance/list",
+        "/console/admin/speaker/list",
+        "/console/admin/conversation/list",
+        "/console/admin/utterance/list",
     ],
 )
 async def test_admin_ui_lists_with_basic_auth(

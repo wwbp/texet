@@ -6,16 +6,10 @@ from typing import Any
 
 from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column
 
 from app.config import DEFAULT_TIMEZONE, UTTERANCE_STATUS_RECEIVED, UTTERANCE_STATUSES_SQL
-
-
-class Base(DeclarativeBase):
-    created_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=lambda: datetime.datetime.now(DEFAULT_TIMEZONE),
-    )
+from app.models.base import Base
 
 
 class Speaker(Base):

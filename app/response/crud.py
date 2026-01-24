@@ -15,7 +15,7 @@ from app.config import (
     UTTERANCE_STATUS_RECEIVED,
     UTTERANCE_STATUSES,
 )
-from app.models import Conversation, Speaker, Utterance
+from app.models.response import Conversation, Speaker, Utterance
 
 DEFAULT_SYSTEM_PROMPT = "you are a helful assistant."
 

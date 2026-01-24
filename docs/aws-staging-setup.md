@@ -90,9 +90,9 @@ Fill these in as you go:
 
 ## Required configuration values
 
-Required for chat:
+Required for response:
 
-- `API_TOKEN` (shared secret for the `/chat` API)
+- `API_KEY` (create with `python -m app.auth.cli` after deploy)
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL`
 - `SMS_OUTBOUND_URL`
@@ -103,7 +103,6 @@ Optional:
 - `SMS_TIMEOUT_SECONDS`
 - `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_SECRET_KEY`
 - `ADMIN_SESSION_TTL_SECONDS`
-- `ADMIN_EXPORT_MAX_ROWS`
 
 Example `DATABASE_URL`:
 `postgresql+asyncpg://texet_user:<password>@<rds-endpoint>:5432/texet`
@@ -299,7 +298,7 @@ instance and curling `http://localhost:8000/health`.
 
 1. In the EB console, open Configuration -> Software.
 2. Add the required environment properties:
-   - `API_TOKEN`, `OPENAI_API_KEY`, `OPENAI_MODEL`, `SMS_OUTBOUND_URL`, `DATABASE_URL`.
+   - `OPENAI_API_KEY`, `OPENAI_MODEL`, `SMS_OUTBOUND_URL`, `DATABASE_URL`.
 3. Add optional admin settings only if you need the admin UI.
 
 ### Step 5: Deploy the app
@@ -353,13 +352,21 @@ Troubleshooting:
 3. Run migrations:
    - `sudo docker exec <container_id> alembic upgrade head`
 
+### Step 6b: Create an API key
+
+1. From the EB instance (or any machine with DB access), create a key:
+   - `sudo docker exec <container_id> uv run python -m app.auth.cli`
+   - Or, if admin UI is enabled, log into `/console` and use "API Keys".
+2. Save the printed key in your secret manager.
+3. Distribute to internal users for `Authorization: Bearer <API_KEY>`.
+
 ### Step 7: Verify it works
 
 1. Open in a browser:
    - `https://<eb-url>/health`
    - `https://<eb-url>/db/health`
 2. Optional smoke test (requires CLI):
-   - `BASE_URL=https://<eb-url> API_TOKEN=... bash scripts/e2e_smoke.sh`
+   - `BASE_URL=https://<eb-url> API_KEY=... bash scripts/e2e_smoke.sh`
 
 ## Reproducibility checklist (record these)
 

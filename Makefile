@@ -1,4 +1,4 @@
-.PHONY: start stop test clean check migration migrate smoke
+.PHONY: start stop test clean check migration migrate smoke api-key
 
 start:
 	docker compose up --build -d
@@ -27,6 +27,10 @@ migrate:
 
 smoke:
 	bash scripts/e2e_smoke.sh
+
+api-key:
+	$(MAKE) check
+	docker compose run --rm --build api uv run python -m app.auth.cli
 
 check:
 	@services="$$(docker compose ps --status running --services)"; \

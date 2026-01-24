@@ -5,16 +5,16 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker
 
-from app import chat as chat_service
+from app.response import service as response_service
 from app.config import UTTERANCE_STATUS_FAILED, UTTERANCE_STATUS_SENT
-from app.db_ops import (
+from app.response.crud import (
     create_queued_utterance,
     create_utterance,
     get_or_create_bot_speaker,
     get_or_create_conversation,
     get_or_create_speaker,
 )
-from app.models import Utterance
+from app.models.response import Utterance
 
 
 def _sessionmaker_from(session: AsyncSession) -> async_sessionmaker[AsyncSession]:
@@ -38,8 +38,8 @@ async def test_run_deferred_reply_success(
         sent["user_id"] = user_id
         sent["message"] = message
 
-    monkeypatch.setattr(chat_service, "_generate_reply", _fake_generate_reply)
-    monkeypatch.setattr(chat_service, "_send_sms", _fake_send_sms)
+    monkeypatch.setattr(response_service, "_generate_reply", _fake_generate_reply)
+    monkeypatch.setattr(response_service, "_send_sms", _fake_send_sms)
 
     async with async_session.begin():
         speaker = await get_or_create_speaker(
@@ -62,7 +62,7 @@ async def test_run_deferred_reply_success(
         bot_utterance_id = bot_utterance.id
 
     sessionmaker = _sessionmaker_from(async_session)
-    await chat_service._run_deferred_reply(
+    await response_service._run_deferred_reply(
         "u-bg-success",
         user_utterance.id,
         bot_utterance_id,
@@ -85,7 +85,7 @@ async def test_run_deferred_reply_failure_marks_failed(
     async def _fake_generate_reply(*_args: object, **_kwargs: object) -> str:
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(chat_service, "_generate_reply", _fake_generate_reply)
+    monkeypatch.setattr(response_service, "_generate_reply", _fake_generate_reply)
 
     async with async_session.begin():
         speaker = await get_or_create_speaker(
@@ -108,7 +108,7 @@ async def test_run_deferred_reply_failure_marks_failed(
         bot_utterance_id = bot_utterance.id
 
     sessionmaker = _sessionmaker_from(async_session)
-    await chat_service._run_deferred_reply(
+    await response_service._run_deferred_reply(
         "u-bg-fail",
         user_utterance.id,
         bot_utterance_id,
@@ -145,11 +145,15 @@ async def test_send_sms_posts_payload(monkeypatch: pytest.MonkeyPatch) -> None:
             captured["json"] = json
             return _FakeResponse()
 
-    monkeypatch.setattr(chat_service, "get_sms_outbound_url", lambda: "https://sms.test")
-    monkeypatch.setattr(chat_service, "get_sms_timeout_seconds", lambda: 7.5)
-    monkeypatch.setattr(chat_service, "httpx", SimpleNamespace(AsyncClient=_FakeClient))
+    monkeypatch.setattr(
+        response_service, "get_sms_outbound_url", lambda: "https://sms.test"
+    )
+    monkeypatch.setattr(response_service, "get_sms_timeout_seconds", lambda: 7.5)
+    monkeypatch.setattr(
+        response_service, "httpx", SimpleNamespace(AsyncClient=_FakeClient)
+    )
 
-    await chat_service._send_sms("u1", "hello")
+    await response_service._send_sms("u1", "hello")
     assert captured["url"] == "https://sms.test"
     assert captured["json"] == {"user_id": "u1", "message": "hello"}
     assert captured["timeout"] == 7.5
@@ -157,6 +161,6 @@ async def test_send_sms_posts_payload(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.asyncio
 async def test_send_sms_requires_url(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(chat_service, "get_sms_outbound_url", lambda: "")
+    monkeypatch.setattr(response_service, "get_sms_outbound_url", lambda: "")
     with pytest.raises(RuntimeError):
-        await chat_service._send_sms("u1", "hello")
+        await response_service._send_sms("u1", "hello")

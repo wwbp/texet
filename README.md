@@ -9,7 +9,7 @@ Texet is a small API service that:
 - generates a reply using OpenAI,
 - sends the reply to your SMS webhook.
 
-There is no end-user UI. You interact with it via HTTP or the admin dashboard.
+There is no end-user UI. You interact with it via HTTP or the console dashboard.
 
 ## Quick start (Docker, no Python required)
 
@@ -31,7 +31,6 @@ This README uses `make` targets for consistency; see `Makefile` for what each ta
    ```
 
 2) Edit `.env.api` and set:
-   - `API_TOKEN` to any random string you will use in requests.
    - `OPENAI_API_KEY` and `OPENAI_MODEL` (example: `gpt-4o-mini`).
    - `SMS_OUTBOUND_URL` to your SMS webhook endpoint (for testing, a request bin works).
    - If you change DB creds in `.env.db`, update `DATABASE_URL` and `DATABASE_URL_TEST`
@@ -49,13 +48,36 @@ This README uses `make` targets for consistency; see `Makefile` for what each ta
    make migrate
    ```
 
-5) Verify in a browser:
-   - `http://localhost:8000/health`
-   - `http://localhost:8000/docs` (interactive API docs)
+5) Create an API key (CLI or console):
 
-6) Send a message:
-   - In `/docs`, use POST `/chat` and set the header `Authorization: Bearer <API_TOKEN>`.
+   ```bash
+   make api-key
+   ```
+
+   Or open `http://localhost:8000/console`, click "API Keys", and create one there.
+   Copy the printed key and keep it somewhere safe. The server does not read
+   `API_KEY` from the environment; clients use it in the `Authorization` header.
+   Keys are shown once. For local smoke tests, export it in your shell:
+
+   ```bash
+   export API_KEY=texet_...
+   ```
+
+6) Verify in a browser:
+   - `http://localhost:8000/health`
+   - `http://localhost:8000/console` (admin + API docs; login required)
+
+7) Send a message:
+   - In `/console/docs`, use POST `/response` and set `Authorization: Bearer <API_KEY>`.
    - The API returns `202 queued`. The reply is sent to `SMS_OUTBOUND_URL`.
+
+8) Optional smoke test:
+
+   ```bash
+   make smoke
+   ```
+
+   If `API_KEY` is not set, the smoke test creates a temporary key for you.
 
 To stop everything:
 
@@ -76,55 +98,55 @@ Want to visualize the local setup? Skim `Makefile` (command entry points) and
 - Webhook: a URL you control that receives outbound replies.
 - Bearer token: a shared secret sent in the `Authorization` header.
 - Migration: a database change that creates or updates tables.
-- Admin interface: the built-in dashboard at `/admin`.
+- Console interface: the built-in dashboard at `/console`.
 - ORM: Python models mapped to database tables (SQLAlchemy).
 
 ## Using the API
 
 - `GET /health` - service health.
 - `GET /db/health` - database health.
-- `POST /chat` - accepts `{ "user_id": "...", "message": "..." }`.
+- `POST /response` - accepts `{ "user_id": "...", "input": "..." }`.
 
 Example:
 
 ```bash
-curl -H "Authorization: Bearer <API_TOKEN>" \
+curl -H "Authorization: Bearer <API_KEY>" \
   -H "Content-Type: application/json" \
-  -X POST http://localhost:8000/chat \
-  -d '{"user_id":"u1","message":"hello"}'
+  -X POST http://localhost:8000/response \
+  -d '{"user_id":"u1","input":"hello"}'
 ```
 
 ## Admin dashboard and exports
 
 - Set `ADMIN_USERNAME`, `ADMIN_PASSWORD`, and `ADMIN_SECRET_KEY` in `.env.api`.
-- Visit `http://localhost:8000/admin`.
-- Admin views are read-only.
-- Export data with Basic auth:
-  - Paste these URLs into a browser after logging in, or use curl.
-  - `GET /admin/export/utterances?format=csv|json&status=sent&since=2024-01-01T00:00:00-05:00`
-  - `GET /admin/export/conversations?format=csv|json&status=open`
-  - `GET /admin/export/speakers?format=csv|json`
+- Visit `http://localhost:8000/console`.
+- Admin views are read-only; create API keys at `/console/api-keys`.
+- Exports: go to `/console/exports`, pick a time range, and download a ConvoKit corpus zip.
 
 ## Configuration
 
-Required for chat:
+Required for server:
 
 - `DATABASE_URL` - async SQLAlchemy URL for the app database.
-- `API_TOKEN` - bearer token for `/chat`.
 - `OPENAI_API_KEY` - OpenAI API key.
 - `OPENAI_MODEL` - model name.
 - `SMS_OUTBOUND_URL` - webhook for outbound replies.
+
+Client auth:
+
+- `API_KEY` - create with `make api-key` or `/console/api-keys` (returns a bearer token).
+- Store it securely and distribute to internal users as needed.
 
 Optional:
 
 - `SMS_TIMEOUT_SECONDS` - outbound HTTP timeout in seconds (default `15`).
 - `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_SECRET_KEY` - enable admin UI.
 - `ADMIN_SESSION_TTL_SECONDS` - session TTL in seconds (default `28800`).
-- `ADMIN_EXPORT_MAX_ROWS` - max rows per export (default `10000`).
 
 Testing:
 
 - `DATABASE_URL_TEST` - async SQLAlchemy URL for the test database (pytest).
+  - Keep this separate from production data; tests wipe this database.
 
 Timezone:
 
@@ -138,6 +160,14 @@ Timezone:
 - `failed`: outbound reply failed; `error` captures the failure.
 
 ## Developer details (optional)
+
+### Code layout
+
+- `app/main.py`, `app/config.py`, `app/db.py` — core app setup.
+- `app/response/` — response endpoint schemas + service + CRUD.
+- `app/auth/` — API key auth + key creation.
+- `app/console/` — console UI + exports + admin views.
+- `app/models/` — models grouped by domain.
 
 ### Developer setup (uv)
 
@@ -175,7 +205,7 @@ Optional: local Python dev outside Docker. If you are just validating the projec
 
 - Migrations use Alembic and the `DATABASE_URL` from the running Compose stack.
 - Migrations are how the database schema is created or updated.
-- Define or update models in `app/models.py`, then generate a migration.
+- Define or update models in `app/models/`, then generate a migration.
 - Create a new migration:
 
   ```bash

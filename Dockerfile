@@ -16,7 +16,7 @@ COPY tests /app/tests
 COPY pytest.ini /app/pytest.ini
 COPY alembic /app/alembic
 COPY alembic.ini /app/alembic.ini
-COPY scripts/docker-entrypoint.sh /app/scripts/docker-entrypoint.sh
+COPY scripts /app/scripts
 RUN chmod +x /app/scripts/docker-entrypoint.sh
 
 EXPOSE 8000

@@ -5,28 +5,41 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import chat as chat_service
+from app.response import service as response_service
+from app.auth import hash_api_key
 from app.config import (
     UTTERANCE_STATUS_FAILED,
     UTTERANCE_STATUS_RECEIVED,
     UTTERANCE_STATUS_SENT,
 )
+from app.response.crud import DEFAULT_SYSTEM_PROMPT
 from app.db import get_async_session
-from app.db_ops import DEFAULT_SYSTEM_PROMPT
 from app.main import app
-from app.models import Conversation, Speaker, Utterance
+from app.models.auth import ApiKey
+from app.models.response import Conversation, Speaker, Utterance
+
+API_KEY = "test-api-key"
 
 
 @pytest.fixture()
 async def async_client(
     async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> AsyncClient:
-    monkeypatch.setenv("API_TOKEN", "test-token")
     monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
     monkeypatch.setenv("OPENAI_MODEL", "gpt-4o-mini")
 
     async def _override_dependency() -> AsyncGenerator[AsyncSession, None]:
         yield async_session
+
+    async with async_session.begin():
+        async_session.add(
+            ApiKey(
+                name="test-key",
+                key_hash=hash_api_key(API_KEY),
+                key_prefix=API_KEY[:8],
+                is_active=True,
+            )
+        )
 
     app.dependency_overrides[get_async_session] = _override_dependency
     transport = ASGITransport(app=app)
@@ -42,7 +55,7 @@ def sms_outbox(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, str]]:
     async def _fake_send_sms(user_id: str, message: str) -> None:
         outbox.append({"user_id": user_id, "message": message})
 
-    monkeypatch.setattr(chat_service, "_send_sms", _fake_send_sms)
+    monkeypatch.setattr(response_service, "_send_sms", _fake_send_sms)
     return outbox
 
 
@@ -62,51 +75,73 @@ def kani_stub(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
         )
         return f"reply:{query}"
 
-    monkeypatch.setattr(chat_service, "_generate_reply", _fake_generate_reply)
+    monkeypatch.setattr(response_service, "_generate_reply", _fake_generate_reply)
     return calls
 
 
 @pytest.mark.asyncio
-async def test_chat_requires_auth(async_client: AsyncClient) -> None:
+async def test_response_requires_auth(async_client: AsyncClient) -> None:
     response = await async_client.post(
-        "/chat",
-        json={"user_id": "u1", "message": "hello"},
+        "/response",
+        json={"user_id": "u1", "input": "hello"},
     )
     assert response.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_chat_validates_payload(async_client: AsyncClient) -> None:
+async def test_response_rejects_invalid_key(async_client: AsyncClient) -> None:
     response = await async_client.post(
-        "/chat",
-        headers={"Authorization": "Bearer test-token"},
+        "/response",
+        headers={"Authorization": "Bearer wrong-key"},
+        json={"user_id": "u1", "input": "hello"},
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_response_validates_payload(async_client: AsyncClient) -> None:
+    response = await async_client.post(
+        "/response",
+        headers={"Authorization": f"Bearer {API_KEY}"},
         json={"user_id": "u1"},
     )
     assert response.status_code == 422
 
 
 @pytest.mark.asyncio
-async def test_chat_allows_empty_message(
-    async_client: AsyncClient, sms_outbox: list[dict[str, str]]
+async def test_response_rejects_unknown_mode(async_client: AsyncClient) -> None:
+    response = await async_client.post(
+        "/response",
+        headers={"Authorization": f"Bearer {API_KEY}"},
+        json={"user_id": "u1", "input": "hello", "mode": "audio"},
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_response_allows_empty_input(
+    async_client: AsyncClient,
+    sms_outbox: list[dict[str, str]],
 ) -> None:
     response = await async_client.post(
-        "/chat",
-        headers={"Authorization": "Bearer test-token"},
-        json={"user_id": "u-empty", "message": ""},
+        "/response",
+        headers={"Authorization": f"Bearer {API_KEY}"},
+        json={"user_id": "u-empty", "input": ""},
     )
     assert response.status_code == 202
     assert sms_outbox == [{"user_id": "u-empty", "message": "reply:"}]
 
 
 @pytest.mark.asyncio
-async def test_chat_allows_large_message(
-    async_client: AsyncClient, sms_outbox: list[dict[str, str]]
+async def test_response_allows_large_input(
+    async_client: AsyncClient,
+    sms_outbox: list[dict[str, str]],
 ) -> None:
     message = "a" * 10_000
     response = await async_client.post(
-        "/chat",
-        headers={"Authorization": "Bearer test-token"},
-        json={"user_id": "u-large", "message": message},
+        "/response",
+        headers={"Authorization": f"Bearer {API_KEY}"},
+        json={"user_id": "u-large", "input": message},
     )
     assert response.status_code == 202
     assert len(sms_outbox) == 1
@@ -116,29 +151,30 @@ async def test_chat_allows_large_message(
 
 
 @pytest.mark.asyncio
-async def test_chat_success_persists(
+async def test_response_success_persists(
     async_client: AsyncClient,
     async_session: AsyncSession,
     sms_outbox: list[dict[str, str]],
     kani_stub: list[dict[str, object]],
 ) -> None:
-    payload = {"user_id": "u1", "message": "hello"}
-    first = await async_client.post(
-        "/chat",
-        headers={"Authorization": "Bearer test-token"},
+    payload = {"user_id": "u1", "input": "hello"}
+    response = await async_client.post(
+        "/response",
+        headers={"Authorization": f"Bearer {API_KEY}"},
         json=payload,
     )
-    assert first.status_code == 202
-    first_body = first.json()
+    assert response.status_code == 202
+    first_body = response.json()
+    assert first_body["object"] == "response"
     assert first_body["status"] == "queued"
+    assert first_body["mode"] == "text"
     assert len(first_body["conversation_id"]) == 32
-    assert len(first_body["reply_utterance_id"]) == 32
-    assert "text" not in first_body
+    assert len(first_body["id"]) == 32
 
-    second_payload = {"user_id": "u1", "message": "again"}
+    second_payload = {"user_id": "u1", "input": "again"}
     second = await async_client.post(
-        "/chat",
-        headers={"Authorization": "Bearer test-token"},
+        "/response",
+        headers={"Authorization": f"Bearer {API_KEY}"},
         json=second_payload,
     )
     assert second.status_code == 202
@@ -146,9 +182,10 @@ async def test_chat_success_persists(
     assert second_body["status"] == "queued"
     assert second_body["conversation_id"] == first_body["conversation_id"]
 
-    assert len(sms_outbox) == 2
-    assert sms_outbox[0] == {"user_id": "u1", "message": "reply:hello"}
-    assert sms_outbox[1] == {"user_id": "u1", "message": "reply:again"}
+    assert sms_outbox == [
+        {"user_id": "u1", "message": "reply:hello"},
+        {"user_id": "u1", "message": "reply:again"},
+    ]
     assert kani_stub[-1]["system_prompt"] == DEFAULT_SYSTEM_PROMPT
 
     async_session.expire_all()
@@ -175,9 +212,15 @@ async def test_chat_success_persists(
         UTTERANCE_STATUS_SENT: 2,
     }
 
+    key_result = await async_session.execute(
+        select(ApiKey).where(ApiKey.name == "test-key")
+    )
+    api_key = key_result.scalar_one()
+    assert api_key.last_used_at is not None
+
 
 @pytest.mark.asyncio
-async def test_chat_multiple_users_interleaved(
+async def test_response_multiple_users_interleaved(
     async_client: AsyncClient,
     async_session: AsyncSession,
     sms_outbox: list[dict[str, str]],
@@ -205,10 +248,10 @@ async def test_chat_multiple_users_interleaved(
 
     for user_id in order:
         seen[user_id] += 1
-        payload = {"user_id": user_id, "message": f"msg-{user_id}-{seen[user_id]}"}
+        payload = {"user_id": user_id, "input": f"msg-{user_id}-{seen[user_id]}"}
         response = await async_client.post(
-            "/chat",
-            headers={"Authorization": "Bearer test-token"},
+            "/response",
+            headers={"Authorization": f"Bearer {API_KEY}"},
             json=payload,
         )
         assert response.status_code == 202
@@ -253,7 +296,7 @@ async def test_chat_multiple_users_interleaved(
 
 
 @pytest.mark.asyncio
-async def test_chat_marks_failed_on_generation_error(
+async def test_response_marks_failed_on_generation_error(
     async_client: AsyncClient,
     async_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
@@ -263,12 +306,12 @@ async def test_chat_marks_failed_on_generation_error(
     ) -> str:
         raise RuntimeError("kani down")
 
-    monkeypatch.setattr(chat_service, "_generate_reply", _fail_generate_reply)
+    monkeypatch.setattr(response_service, "_generate_reply", _fail_generate_reply)
 
-    payload = {"user_id": "u8", "message": "hello"}
+    payload = {"user_id": "u8", "input": "hello"}
     response = await async_client.post(
-        "/chat",
-        headers={"Authorization": "Bearer test-token"},
+        "/response",
+        headers={"Authorization": f"Bearer {API_KEY}"},
         json=payload,
     )
     assert response.status_code == 202
@@ -283,7 +326,7 @@ async def test_chat_marks_failed_on_generation_error(
 
 
 @pytest.mark.asyncio
-async def test_chat_marks_failed_on_sms_error(
+async def test_response_marks_failed_on_sms_error(
     async_client: AsyncClient,
     async_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
@@ -291,12 +334,12 @@ async def test_chat_marks_failed_on_sms_error(
     async def _fail_send_sms(user_id: str, message: str) -> None:
         raise RuntimeError("sms gateway down")
 
-    monkeypatch.setattr(chat_service, "_send_sms", _fail_send_sms)
+    monkeypatch.setattr(response_service, "_send_sms", _fail_send_sms)
 
-    payload = {"user_id": "u9", "message": "hello"}
+    payload = {"user_id": "u9", "input": "hello"}
     response = await async_client.post(
-        "/chat",
-        headers={"Authorization": "Bearer test-token"},
+        "/response",
+        headers={"Authorization": f"Bearer {API_KEY}"},
         json=payload,
     )
     assert response.status_code == 202

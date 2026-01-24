@@ -5,7 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import DEFAULT_TIMEZONE, UTTERANCE_STATUS_QUEUED, UTTERANCE_STATUS_RECEIVED
-from app.db_ops import (
+from app.response.crud import (
     build_chat_history,
     create_conversation,
     create_queued_utterance,
@@ -15,7 +15,7 @@ from app.db_ops import (
     get_or_create_speaker,
     get_or_create_system_prompt,
 )
-from app.models import Conversation, Utterance
+from app.models.response import Conversation, Utterance
 
 
 @pytest.mark.asyncio

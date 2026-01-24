@@ -1,4 +1,4 @@
-from typing import cast
+from typing import Any, cast
 
 import httpx
 from fastapi import BackgroundTasks
@@ -21,8 +21,7 @@ from app.config import (
     get_sms_outbound_url,
     get_sms_timeout_seconds,
 )
-from app.db import get_sessionmaker
-from app.db_ops import (
+from app.response.crud import (
     build_chat_history,
     create_queued_utterance,
     create_utterance,
@@ -31,8 +30,14 @@ from app.db_ops import (
     get_or_create_speaker,
     get_or_create_system_prompt,
 )
-from app.models import Utterance
-from app.schemas import ChatQueuedResponse, ChatRequest
+from app.db import get_sessionmaker
+from app.models.response import Utterance
+from app.response.schemas import (
+    ChatQueuedResponse,
+    ChatRequest,
+    ResponseQueuedResponse,
+    ResponseRequest,
+)
 
 
 async def _generate_reply(
@@ -123,6 +128,7 @@ async def process_chat(
     session: AsyncSession,
     payload: ChatRequest,
     background_tasks: BackgroundTasks,
+    meta: dict[str, Any] | None = None,
 ) -> ChatQueuedResponse:
     async with session.begin():
         speaker = await get_or_create_speaker(
@@ -137,6 +143,7 @@ async def process_chat(
             conversation.id,
             speaker.id,
             payload.message,
+            meta=meta,
             status=UTTERANCE_STATUS_RECEIVED,
         )
 
@@ -169,4 +176,22 @@ async def process_chat(
         conversation_id=conversation.id,
         reply_utterance_id=bot_utterance.id,
         status=UTTERANCE_STATUS_QUEUED,
+    )
+
+
+async def process_response(
+    session: AsyncSession,
+    payload: ResponseRequest,
+    background_tasks: BackgroundTasks,
+) -> ResponseQueuedResponse:
+    chat_request = ChatRequest(user_id=payload.user_id, message=payload.input)
+    chat_response = await process_chat(
+        session, chat_request, background_tasks, meta=payload.metadata
+    )
+    return ResponseQueuedResponse(
+        id=chat_response.reply_utterance_id,
+        object="response",
+        status=chat_response.status,
+        conversation_id=chat_response.conversation_id,
+        mode=payload.mode,
     )

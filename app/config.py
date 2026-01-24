@@ -3,11 +3,6 @@ import os
 from typing import Final, Literal
 
 
-# API_TOKEN: bearer auth for /chat.
-def get_api_token() -> str:
-    return os.getenv("API_TOKEN", "")
-
-
 # SMS_OUTBOUND_URL: webhook to deliver outbound SMS replies.
 def get_sms_outbound_url() -> str:
     return os.getenv("SMS_OUTBOUND_URL", "")
@@ -62,18 +57,6 @@ def get_admin_session_ttl_seconds() -> int:
     return parsed if parsed >= 300 else 8 * 60 * 60
 
 
-# ADMIN_EXPORT_MAX_ROWS: cap rows in admin exports.
-def get_admin_export_max_rows() -> int:
-    value = os.getenv("ADMIN_EXPORT_MAX_ROWS")
-    if not value:
-        return 10_000
-    try:
-        parsed = int(value)
-    except ValueError:
-        return 10_000
-    return parsed if parsed >= 1 else 10_000
-
-
 def admin_enabled() -> bool:
     return bool(get_admin_username() and get_admin_password() and get_admin_secret_key())
 
@@ -96,3 +79,5 @@ DEFAULT_TIMEZONE_NAME: Final[str] = "EST"
 DEFAULT_TIMEZONE: Final[datetime.tzinfo] = datetime.timezone(
     datetime.timedelta(hours=-5), name=DEFAULT_TIMEZONE_NAME
 )
+
+CONSOLE_PREFIX: Final[str] = "/console"
