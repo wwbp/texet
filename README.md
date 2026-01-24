@@ -1,27 +1,72 @@
 # Texet API
 
 ## What this does
-
-Texet is a small API service that:
+Texet is a small API service (web endpoints you call) that:
 
 - accepts inbound messages for a user,
-- stores them in Postgres,
+- stores them in Postgres (database),
 - generates a reply using OpenAI,
-- sends the reply to your SMS webhook.
+- sends the reply to your SMS webhook (a URL you control).
 
-There is no end-user UI. You interact with it via HTTP or the console dashboard.
+There is no end-user UI. You interact with it via HTTP (web requests) or the console dashboard (admin web page).
 
-## Quick start (Docker, no Python required)
+If you are monitoring or managing, start at Console. If you are setting things up, start at
+Quick start and Configuration. For build/test details, see Developer details.
 
+
+## Console
+Use the console to monitor data, manage API access, and export datasets.
+
+- Console home: `http://localhost:8000/console`
+- Admin views (read-only): `/console/admin` (speakers, conversations, utterances)
+- API keys: `/console/api-keys` (create keys; shown once)
+- Exports: `/console/exports` (download verified ConvoKit corpora; ConvoKit is a conversation dataset format)
+- API docs: `/console/docs` (interactive docs; uses live environment)
+
+Notes:
+
+- Console access requires `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_SECRET_KEY`.
+- API docs run against the current environment. Use test keys/data when validating changes.
+- Exports are logged in the console (status, counts, verification, timestamps).
+
+
+## Using the API
+- `GET /health` - service health.
+- `GET /db/health` - database health.
+- `POST /response` - accepts `{ "user_id": "...", "input": "...", "mode": "text", "metadata": { ... } }` (mode is `text` today; metadata is optional extra info).
+
+Response:
+
+- `202 queued` with `{ "id", "object", "status", "conversation_id", "mode" }`.
+
+Example:
+
+```bash
+curl -H "Authorization: Bearer <API_KEY>" \
+  -H "Content-Type: application/json" \
+  -X POST http://localhost:8000/response \
+  -d '{"user_id":"u1","input":"hello","mode":"text","metadata":{"source":"sms"}}'
+```
+
+
+## Utterance status
+- `received`: inbound user message stored.
+- `queued`: outbound reply persisted, pending send.
+- `sent`: outbound reply delivered to SMS webhook.
+- `failed`: outbound reply failed; `error` captures the failure.
+
+
+## Quick start (Docker, no local Python)
 Prereqs:
 
-- Docker Desktop installed and running.
+- Docker Desktop installed and running (runs containers locally).
 - A text editor to edit `.env` files.
 - An OpenAI API key and an SMS webhook URL (optional for smoke tests).
 
 Command examples below are `bash` (macOS/Linux). On Windows, use WSL or PowerShell equivalents.
 This README uses `make` targets for consistency; see `Makefile` for what each target runs and
-`docker-compose.yml` for the local services.
+`docker-compose.yml` for the local services (Docker Compose runs the app stack). For dependency management and local tooling, see
+Package management (uv) below.
 
 1) Create local env files:
 
@@ -42,7 +87,7 @@ This README uses `make` targets for consistency; see `Makefile` for what each ta
    make start
    ```
 
-4) Apply migrations:
+4) Apply migrations (database changes):
 
    ```bash
    make migrate
@@ -68,7 +113,7 @@ This README uses `make` targets for consistency; see `Makefile` for what each ta
    - `http://localhost:8000/console` (admin + API docs; login required)
 
 7) Send a message:
-   - In `/console/docs`, use POST `/response` and set `Authorization: Bearer <API_KEY>`.
+   - In `/console/docs`, use POST `/response` and set `Authorization: Bearer <API_KEY>` (bearer token = shared secret).
    - The API returns `202 queued`. The reply is sent to `SMS_OUTBOUND_URL`.
 
 8) Optional smoke test:
@@ -92,75 +137,37 @@ Want to visualize the local setup? Skim `Makefile` (command entry points) and
 <https://docs.docker.com/get-started/>, <https://docs.docker.com/compose/>, and
 <https://makefiletutorial.com/>.
 
-## Terms at a glance
-
-- API: a URL-based interface you call with HTTP.
-- Webhook: a URL you control that receives outbound replies.
-- Bearer token: a shared secret sent in the `Authorization` header.
-- Migration: a database change that creates or updates tables.
-- Console interface: the built-in dashboard at `/console`.
-- ORM: Python models mapped to database tables (SQLAlchemy).
-
-## Using the API
-
-- `GET /health` - service health.
-- `GET /db/health` - database health.
-- `POST /response` - accepts `{ "user_id": "...", "input": "..." }`.
-
-Example:
-
-```bash
-curl -H "Authorization: Bearer <API_KEY>" \
-  -H "Content-Type: application/json" \
-  -X POST http://localhost:8000/response \
-  -d '{"user_id":"u1","input":"hello"}'
-```
-
-## Admin dashboard and exports
-
-- Set `ADMIN_USERNAME`, `ADMIN_PASSWORD`, and `ADMIN_SECRET_KEY` in `.env.api`.
-- Visit `http://localhost:8000/console`.
-- Admin views are read-only; create API keys at `/console/api-keys`.
-- Exports: go to `/console/exports`, pick a time range, and download a ConvoKit corpus zip.
 
 ## Configuration
-
 Required for server:
 
-- `DATABASE_URL` - async SQLAlchemy URL for the app database.
+- `DATABASE_URL` - database connection string (async SQLAlchemy format).
 - `OPENAI_API_KEY` - OpenAI API key.
 - `OPENAI_MODEL` - model name.
-- `SMS_OUTBOUND_URL` - webhook for outbound replies.
+- `SMS_OUTBOUND_URL` - webhook URL for outbound replies.
 
 Client auth:
 
-- `API_KEY` - create with `make api-key` or `/console/api-keys` (returns a bearer token).
+- `API_KEY` - create with `make api-key` or `/console/api-keys` (bearer token = shared secret).
 - Store it securely and distribute to internal users as needed.
 
 Optional:
 
 - `SMS_TIMEOUT_SECONDS` - outbound HTTP timeout in seconds (default `15`).
 - `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_SECRET_KEY` - enable admin UI.
-- `ADMIN_SESSION_TTL_SECONDS` - session TTL in seconds (default `28800`).
+- `ADMIN_SESSION_TTL_SECONDS` - admin login session lifetime in seconds (default `28800`).
 
 Testing:
 
-- `DATABASE_URL_TEST` - async SQLAlchemy URL for the test database (pytest).
+- `DATABASE_URL_TEST` - test database connection string (async SQLAlchemy format).
   - Keep this separate from production data; tests wipe this database.
 
 Timezone:
 
 - API and database sessions default to `EST` (UTC-05:00).
 
-## Utterance status
 
-- `received`: inbound user message stored.
-- `queued`: outbound reply persisted, pending send.
-- `sent`: outbound reply delivered to SMS webhook.
-- `failed`: outbound reply failed; `error` captures the failure.
-
-## Developer details (optional)
-
+## Developer details
 ### Code layout
 
 - `app/main.py`, `app/config.py`, `app/db.py` — core app setup.
@@ -169,22 +176,16 @@ Timezone:
 - `app/console/` — console UI + exports + admin views.
 - `app/models/` — models grouped by domain.
 
-### Developer setup (uv)
+### Package management (uv)
 
-Optional: local Python dev outside Docker. If you are just validating the project, use the
-`make` commands above.
+We use `uv` (Python package manager) to manage dependencies and tooling. Day-to-day runtime still
+uses Docker Compose; use `uv` when you need to add/upgrade packages or run local tools.
 
 - Install uv: <https://docs.astral.sh/uv/getting-started/installation/>
 - Create the local environment and lockfile:
 
   ```bash
   uv sync
-  ```
-
-- Run locally:
-
-  ```bash
-  uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
   ```
 
 ### Dependencies
@@ -203,7 +204,7 @@ Optional: local Python dev outside Docker. If you are just validating the projec
 
 ### Migrations
 
-- Migrations use Alembic and the `DATABASE_URL` from the running Compose stack.
+- Migrations use Alembic (migration tool) and the `DATABASE_URL` from the running Docker Compose stack.
 - Migrations are how the database schema is created or updated.
 - Define or update models in `app/models/`, then generate a migration.
 - Create a new migration:
@@ -222,7 +223,7 @@ Optional: local Python dev outside Docker. If you are just validating the projec
 
 ### LLM integration
 
-- Background task pipeline uses Kani with OpenAI for reply generation.
+- Background task pipeline uses Kani (LLM orchestration) with OpenAI (model provider) for reply generation.
 - Requires `OPENAI_API_KEY` and `OPENAI_MODEL`.
 - Failures mark the reply utterance as `failed` with an error message.
 
@@ -274,8 +275,8 @@ Optional: local Python dev outside Docker. If you are just validating the projec
 - `make migration name=...` creates a new Alembic revision (requires the DB running).
 - `make migrate` applies Alembic migrations (requires the DB running).
 
-## Notes
 
+## Notes
 - Do not commit `.env` files or real API keys. Rotate any keys that have been shared.
 - Model schema informed by ConvoKit: <https://convokit.cornell.edu/>
 - Kani docs: <https://kani.readthedocs.io/>
