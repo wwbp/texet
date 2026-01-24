@@ -26,7 +26,7 @@ Use the console to monitor data, manage API access, and export datasets.
 
 Notes:
 
-- Console access requires `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_SECRET_KEY`.
+- Console access requires `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_SECRET_KEY` (optional env vars that enable the console/admin UI).
 - API docs run against the current environment. Use test keys/data when validating changes.
 - Exports are logged in the console (status, counts, verification, timestamps).
 
@@ -155,8 +155,8 @@ Client auth:
 Optional:
 
 - `SMS_TIMEOUT_SECONDS` - outbound HTTP timeout in seconds (default `15`).
-- `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_SECRET_KEY` - enable admin UI.
-- `ADMIN_SESSION_TTL_SECONDS` - admin login session lifetime in seconds (default `28800`).
+- `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_SECRET_KEY` - enable console (admin UI).
+- `ADMIN_SESSION_TTL_SECONDS` - console/admin login session lifetime in seconds (default `28800`).
 
 Testing:
 
