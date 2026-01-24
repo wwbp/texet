@@ -170,8 +170,6 @@ Timezone:
 
 - API and database sessions default to `EST` (UTC-05:00).
 
-## Developer details
-
 ### Code layout
 
 - `app/main.py`, `app/config.py`, `app/db.py` — core app setup.
