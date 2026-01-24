@@ -14,14 +14,17 @@ There is no end-user UI. You interact with it via HTTP (web requests) or the con
 If you are monitoring or managing, start at Console. If you are setting things up, start at
 Quick start and Configuration. For build/test details, see Developer details.
 
-## Console
+Local vs live: "local" means on your machine (`http://localhost:8000`). "live" means the deployed server URL.
+Links below are local unless they say "live".
+
+## Console (local)
 
 Use the console to monitor data, manage API access, and export datasets.
 
-- Console home: `http://localhost:8000/console`
+- Console home (local): `http://localhost:8000/console`
 - Admin views (read-only): `/console/admin` (speakers, conversations, utterances)
 - API keys: `/console/api-keys` (create keys; shown once)
-- Exports: `/console/exports` (download verified ConvoKit corpora; ConvoKit is a conversation dataset format)
+- Exports: `/console/exports` (download ConvoKit corpora; ConvoKit is a conversation dataset format)
 - API docs: `/console/docs` (interactive docs; uses live environment)
 
 Notes:
@@ -30,7 +33,7 @@ Notes:
 - API docs run against the current environment. Use test keys/data when validating changes.
 - Exports are logged in the console (status, counts, verification, timestamps).
 
-## Using the API
+## Using the API (local)
 
 - `GET /health` - service health.
 - `GET /db/health` - database health.
@@ -40,7 +43,7 @@ Response:
 
 - `202 queued` with `{ "id", "object", "status", "conversation_id", "mode" }`.
 
-Example:
+Example (local):
 
 ```bash
 curl -H "Authorization: Bearer <API_KEY>" \
@@ -56,7 +59,7 @@ curl -H "Authorization: Bearer <API_KEY>" \
 - `sent`: outbound reply delivered to SMS webhook.
 - `failed`: outbound reply failed; `error` captures the failure.
 
-## Quick start (Docker, no local Python)
+## Quick start (Docker, local only)
 
 Prereqs:
 
