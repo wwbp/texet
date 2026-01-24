@@ -1,6 +1,7 @@
 # Texet API
 
 ## What this does
+
 Texet is a small API service (web endpoints you call) that:
 
 - accepts inbound messages for a user,
@@ -13,8 +14,8 @@ There is no end-user UI. You interact with it via HTTP (web requests) or the con
 If you are monitoring or managing, start at Console. If you are setting things up, start at
 Quick start and Configuration. For build/test details, see Developer details.
 
-
 ## Console
+
 Use the console to monitor data, manage API access, and export datasets.
 
 - Console home: `http://localhost:8000/console`
@@ -29,8 +30,8 @@ Notes:
 - API docs run against the current environment. Use test keys/data when validating changes.
 - Exports are logged in the console (status, counts, verification, timestamps).
 
-
 ## Using the API
+
 - `GET /health` - service health.
 - `GET /db/health` - database health.
 - `POST /response` - accepts `{ "user_id": "...", "input": "...", "mode": "text", "metadata": { ... } }` (mode is `text` today; metadata is optional extra info).
@@ -48,15 +49,15 @@ curl -H "Authorization: Bearer <API_KEY>" \
   -d '{"user_id":"u1","input":"hello","mode":"text","metadata":{"source":"sms"}}'
 ```
 
-
 ## Utterance status
+
 - `received`: inbound user message stored.
 - `queued`: outbound reply persisted, pending send.
 - `sent`: outbound reply delivered to SMS webhook.
 - `failed`: outbound reply failed; `error` captures the failure.
 
-
 ## Quick start (Docker, no local Python)
+
 Prereqs:
 
 - Docker Desktop installed and running (runs containers locally).
@@ -127,18 +128,18 @@ Package management (uv) below.
 To stop everything:
 
 ```bash
-make stop
+make down
 ```
 
-Note: `make stop` removes volumes, which wipes local DB data.
+Note: `make reset` removes volumes, which wipes local DB data.
 
 Want to visualize the local setup? Skim `Makefile` (command entry points) and
 `docker-compose.yml` (services and ports). If these tools are new, the docs help:
 <https://docs.docker.com/get-started/>, <https://docs.docker.com/compose/>, and
 <https://makefiletutorial.com/>.
 
-
 ## Configuration
+
 Required for server:
 
 - `DATABASE_URL` - database connection string (async SQLAlchemy format).
@@ -166,8 +167,8 @@ Timezone:
 
 - API and database sessions default to `EST` (UTC-05:00).
 
-
 ## Developer details
+
 ### Code layout
 
 - `app/main.py`, `app/config.py`, `app/db.py` — core app setup.
@@ -261,7 +262,7 @@ uses Docker Compose; use `uv` when you need to add/upgrade packages or run local
 - Run lint/format/typecheck/audit:
 
   ```bash
-  make clean
+  make fix
   ```
 
 - See `Makefile` for the exact commands.
@@ -269,14 +270,18 @@ uses Docker Compose; use `uv` when you need to add/upgrade packages or run local
 ### Make targets
 
 - `make start` builds and starts the stack.
-- `make stop` stops and removes the stack (including volumes).
+- `make down` stops the stack (keeps volumes).
+- `make reset` stops the stack and removes volumes.
 - `make test` runs the full test suite with coverage (requires the DB running via `make start`).
-- `make clean` runs linting, formatting, type checks, and vulnerability audit.
+- `make lint` runs lint checks (no fixes).
+- `make fix` applies lint fixes and formatting.
+- `make type` runs type checks.
+- `make audit` runs a dependency vulnerability audit.
 - `make migration name=...` creates a new Alembic revision (requires the DB running).
 - `make migrate` applies Alembic migrations (requires the DB running).
 
-
 ## Notes
+
 - Do not commit `.env` files or real API keys. Rotate any keys that have been shared.
 - Model schema informed by ConvoKit: <https://convokit.cornell.edu/>
 - Kani docs: <https://kani.readthedocs.io/>

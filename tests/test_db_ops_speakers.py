@@ -2,8 +2,8 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.response.crud import bot_speaker_id, get_or_create_bot_speaker, get_or_create_speaker
 from app.models.response import Speaker
+from app.response.crud import bot_speaker_id, get_or_create_bot_speaker, get_or_create_speaker
 
 
 @pytest.mark.asyncio

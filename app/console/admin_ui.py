@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 
+from fastapi import FastAPI
 from sqladmin import Admin, ModelView
 from sqladmin.authentication import AuthenticationBackend
 from sqladmin.filters import AllUniqueStringValuesFilter, StaticValuesFilter
@@ -203,7 +204,7 @@ class AdminExportAdmin(ModelView, model=AdminExport):
     }
 
 
-def init_console(app) -> None:
+def init_console(app: FastAPI) -> None:
     if getattr(app.state, "admin_initialized", False):
         return
     if not admin_enabled():

@@ -5,8 +5,9 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker
 
-from app.response import service as response_service
 from app.config import UTTERANCE_STATUS_FAILED, UTTERANCE_STATUS_SENT
+from app.models.response import Utterance
+from app.response import service as response_service
 from app.response.crud import (
     create_queued_utterance,
     create_utterance,
@@ -14,7 +15,6 @@ from app.response.crud import (
     get_or_create_conversation,
     get_or_create_speaker,
 )
-from app.models.response import Utterance
 
 
 def _sessionmaker_from(session: AsyncSession) -> async_sessionmaker[AsyncSession]:

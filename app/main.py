@@ -8,16 +8,16 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.console import console_router, init_console
 from app.auth import require_auth
-from app.response import process_response
 from app.config import (
     DEFAULT_TIMEZONE,
     admin_enabled,
     get_admin_secret_key,
     get_admin_session_ttl_seconds,
 )
+from app.console import console_router, init_console
 from app.db import get_async_session, ping_db
+from app.response import process_response
 from app.response.schemas import ResponseQueuedResponse, ResponseRequest
 
 

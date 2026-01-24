@@ -6,9 +6,10 @@ import json
 import shutil
 import tempfile
 import zipfile
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from fastapi import BackgroundTasks, Depends, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
@@ -18,12 +19,12 @@ from starlette.requests import Request
 
 from app.config import CONSOLE_PREFIX, DEFAULT_TIMEZONE
 from app.console.core import (
-    console_router,
-    require_admin,
     _escape,
     _now,
     _parse_datetime,
     _serialize_datetime,
+    console_router,
+    require_admin,
 )
 from app.db import get_async_session
 from app.models.admin import AdminExport
@@ -167,14 +168,14 @@ async def build_convokit_export(
         speaker_result = await session.execute(
             select(Speaker).where(Speaker.id.in_(speaker_ids))
         )
-        speakers = speaker_result.scalars().all()
+        speakers = list(speaker_result.scalars().all())
 
     conversations: list[Conversation] = []
     if conversation_ids:
         conversation_result = await session.execute(
             select(Conversation).where(Conversation.id.in_(conversation_ids))
         )
-        conversations = conversation_result.scalars().all()
+        conversations = list(conversation_result.scalars().all())
 
     reply_to_missing = 0
     utterance_rows: list[dict[str, Any]] = []
@@ -221,8 +222,8 @@ async def build_convokit_export(
     conversation_rows: dict[str, dict[str, Any]] = {}
     conversation_metas: list[dict[str, Any]] = []
     for conversation in conversations:
-        convokit_conversation_id = conversation_first_utterance.get(conversation.id)
-        if not convokit_conversation_id:
+        convokit_id = conversation_first_utterance.get(conversation.id)
+        if not convokit_id:
             continue
         meta = _merge_meta(
             conversation.meta,
@@ -234,7 +235,7 @@ async def build_convokit_export(
                 "texet_created_at": _iso(conversation.created_at),
             },
         )
-        conversation_rows[convokit_conversation_id] = meta
+        conversation_rows[convokit_id] = meta
         conversation_metas.append(meta)
 
     counts = ExportCounts(
@@ -338,9 +339,23 @@ def _render_exports_page(
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Texet Console - Exports</title>
         <style>
-          :root{{color-scheme:light;--bg:#f6f3ef;--panel:#fff;--text:#1f2328;--muted:#5f6b7a;--accent:#1c5d99;--border:#e5e1da;--error:#b42318}}
+          :root{{
+            color-scheme:light;
+            --bg:#f6f3ef;
+            --panel:#fff;
+            --text:#1f2328;
+            --muted:#5f6b7a;
+            --accent:#1c5d99;
+            --border:#e5e1da;
+            --error:#b42318;
+          }}
           *{{box-sizing:border-box}}
-          body{{margin:0;font-family:"SF Pro Text","Segoe UI","Helvetica Neue","Noto Sans",sans-serif;color:var(--text);background:var(--bg)}}
+          body{{
+            margin:0;
+            font-family:"SF Pro Text","Segoe UI","Helvetica Neue","Noto Sans",sans-serif;
+            color:var(--text);
+            background:var(--bg);
+          }}
           .wrap{{max-width:980px;margin:0 auto;padding:40px 20px 56px}}
           h1{{margin:0 0 6px;font-size:24px;letter-spacing:-.02em}}
           h2{{margin:24px 0 10px;font-size:16px}}
@@ -348,10 +363,36 @@ def _render_exports_page(
           .muted{{color:var(--muted);font-size:13px}}
           form{{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-top:12px}}
           label{{font-size:12px;color:var(--muted)}}
-          input{{padding:8px 10px;border:1px solid var(--border);border-radius:10px;min-width:220px}}
-          button{{padding:8px 14px;border-radius:10px;border:1px solid var(--accent);background:var(--accent);color:#fff;font-weight:600;cursor:pointer}}
-          table{{width:100%;border-collapse:collapse;margin-top:12px;border:1px solid var(--border);background:var(--panel);border-radius:12px;overflow:hidden}}
-          th,td{{padding:10px 12px;border-bottom:1px solid var(--border);text-align:left;font-size:13px}}
+          input{{
+            padding:8px 10px;
+            border:1px solid var(--border);
+            border-radius:10px;
+            min-width:220px;
+          }}
+          button{{
+            padding:8px 14px;
+            border-radius:10px;
+            border:1px solid var(--accent);
+            background:var(--accent);
+            color:#fff;
+            font-weight:600;
+            cursor:pointer;
+          }}
+          table{{
+            width:100%;
+            border-collapse:collapse;
+            margin-top:12px;
+            border:1px solid var(--border);
+            background:var(--panel);
+            border-radius:12px;
+            overflow:hidden;
+          }}
+          th,td{{
+            padding:10px 12px;
+            border-bottom:1px solid var(--border);
+            text-align:left;
+            font-size:13px;
+          }}
           th{{font-size:12px;color:var(--muted);font-weight:600}}
           .error{{margin-top:12px;color:var(--error);font-size:13px}}
           a{{color:var(--accent);text-decoration:none}}
@@ -393,7 +434,9 @@ def _render_exports_page(
               {rows}
             </tbody>
           </table>
-          <p class="muted" style="margin-top:16px;"><a href="{CONSOLE_PREFIX}">Back to console</a></p>
+          <p class="muted" style="margin-top:16px;">
+            <a href="{CONSOLE_PREFIX}">Back to console</a>
+          </p>
         </div>
       </body>
     </html>
@@ -409,7 +452,7 @@ async def console_exports(
     result = await session.execute(
         select(AdminExport).order_by(AdminExport.created_at.desc()).limit(25)
     )
-    exports = result.scalars().all()
+    exports = list(result.scalars().all())
     return _render_exports_page(exports)
 
 
@@ -443,28 +486,28 @@ async def console_exports_create(
         )
     except Exception as exc:
         await session.rollback()
-        export = await session.get(AdminExport, export_id)
-        if export:
-            export.status = "failed"
-            export.completed_at = _now()
-            export.error = str(exc).strip() or exc.__class__.__name__
+        export_record = await session.get(AdminExport, export_id)
+        if export_record:
+            export_record.status = "failed"
+            export_record.completed_at = _now()
+            export_record.error = str(exc).strip() or exc.__class__.__name__
             await session.commit()
         raise HTTPException(status_code=500, detail="Export failed.") from exc
 
-    export = await session.get(AdminExport, export_id)
-    if export is None:
+    export_record = await session.get(AdminExport, export_id)
+    if export_record is None:
         shutil.rmtree(artifact.temp_dir, ignore_errors=True)
         raise HTTPException(status_code=500, detail="Export record missing.")
 
-    export.status = "completed" if artifact.verified else "failed"
-    export.completed_at = _now()
-    export.utterance_count = artifact.counts.utterances
-    export.conversation_count = artifact.counts.conversations
-    export.speaker_count = artifact.counts.speakers
-    export.verified = artifact.verified
-    export.verification_error = artifact.verification_error
-    export.sha256 = artifact.sha256
-    export.meta = artifact.meta
+    export_record.status = "completed" if artifact.verified else "failed"
+    export_record.completed_at = _now()
+    export_record.utterance_count = artifact.counts.utterances
+    export_record.conversation_count = artifact.counts.conversations
+    export_record.speaker_count = artifact.counts.speakers
+    export_record.verified = artifact.verified
+    export_record.verification_error = artifact.verification_error
+    export_record.sha256 = artifact.sha256
+    export_record.meta = artifact.meta
     await session.commit()
 
     if not artifact.verified:

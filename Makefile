@@ -1,40 +1,49 @@
-.PHONY: start stop test clean check migration migrate smoke api-key
+.PHONY: help start down reset check test migration migrate smoke api-key lint fix type audit
 
-start:
+help:
+	@awk 'BEGIN{FS=":.*##"} /^[a-zA-Z_-]+:.*##/{printf "%-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+
+start: ## Build and start the stack
 	docker compose up --build -d
 
-stop:
+down: ## Stop the stack (keep volumes)
+	docker compose down
+
+reset: ## Stop the stack and remove volumes
 	docker compose down -v
 
-test:
-	$(MAKE) check
+check: ## Ensure the database container is running
+	@services="$$(docker compose ps --status running --services)"; \
+	echo "$$services" | grep -qx "db" || { \
+		echo "Database not running. Run 'make start' first."; \
+		exit 1; \
+	}
+
+test: check ## Run tests with coverage
 	docker compose run --rm --build api uv run pytest --cov
 
-clean:
+lint: ## Lint (no fixes)
 	docker compose run --rm --build api uv run ruff check .
-	docker compose run --rm --build api uv run ruff format .
+
+fix: ## Auto-fix lint and format
+	docker compose run --rm --build -v $(CURDIR):/app api uv run ruff check --fix .
+	docker compose run --rm --build -v $(CURDIR):/app api uv run ruff format .
+
+type: ## Type check
 	docker compose run --rm --build api uv run mypy
+
+audit: ## Dependency audit
 	docker compose run --rm --build api uv run pip-audit
 
-migration:
-	$(MAKE) check
+migration: check ## Create a new migration (name=...)
 	@if [ -z "$(name)" ]; then echo "Usage: make migration name=..."; exit 1; fi
 	docker compose run --rm --build -v $(CURDIR):/app api alembic revision --autogenerate -m "$(name)"
 
-migrate:
-	$(MAKE) check
+migrate: check ## Apply migrations
 	docker compose run --rm --build -v $(CURDIR):/app api alembic upgrade head
 
-smoke:
+smoke: check ## Run end-to-end smoke test
 	bash scripts/e2e_smoke.sh
 
-api-key:
-	$(MAKE) check
+api-key: check ## Create an API key
 	docker compose run --rm --build api uv run python -m app.auth.cli
-
-check:
-	@services="$$(docker compose ps --status running --services)"; \
-	echo "$$services" | grep -qx "db" || { \
-		echo "Database not running. Run 'make start' or 'docker compose up -d db' first."; \
-		exit 1; \
-	}

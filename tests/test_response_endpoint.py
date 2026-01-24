@@ -5,18 +5,18 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.response import service as response_service
 from app.auth import hash_api_key
 from app.config import (
     UTTERANCE_STATUS_FAILED,
     UTTERANCE_STATUS_RECEIVED,
     UTTERANCE_STATUS_SENT,
 )
-from app.response.crud import DEFAULT_SYSTEM_PROMPT
 from app.db import get_async_session
 from app.main import app
 from app.models.auth import ApiKey
 from app.models.response import Conversation, Speaker, Utterance
+from app.response import service as response_service
+from app.response.crud import DEFAULT_SYSTEM_PROMPT
 
 API_KEY = "test-api-key"
 

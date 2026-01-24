@@ -21,6 +21,8 @@ from app.config import (
     get_sms_outbound_url,
     get_sms_timeout_seconds,
 )
+from app.db import get_sessionmaker
+from app.models.response import Utterance
 from app.response.crud import (
     build_chat_history,
     create_queued_utterance,
@@ -30,8 +32,6 @@ from app.response.crud import (
     get_or_create_speaker,
     get_or_create_system_prompt,
 )
-from app.db import get_sessionmaker
-from app.models.response import Utterance
 from app.response.schemas import (
     ChatQueuedResponse,
     ChatRequest,
