@@ -57,9 +57,7 @@ async def _ensure_test_db(database_url: str, reset: bool = False) -> None:
             await conn.execute(f'CREATE DATABASE "{url.database}"')
             return
 
-        exists = await conn.fetchval(
-            "SELECT 1 FROM pg_database WHERE datname = $1", url.database
-        )
+        exists = await conn.fetchval("SELECT 1 FROM pg_database WHERE datname = $1", url.database)
         if not exists:
             await conn.execute(f'CREATE DATABASE "{url.database}"')
     finally:
@@ -101,8 +99,7 @@ def migrated_test_db() -> None:
     actual.discard("alembic_version")
     if expected != actual:
         raise RuntimeError(
-            f"Migration mismatch. Expected tables {sorted(expected)}; "
-            f"found {sorted(actual)}."
+            f"Migration mismatch. Expected tables {sorted(expected)}; found {sorted(actual)}."
         )
 
 
@@ -118,13 +115,9 @@ async def async_session() -> AsyncSession:
         connect_args={"server_settings": {"timezone": DEFAULT_TIMEZONE_NAME}},
     )
     async with engine.begin() as connection:
-        table_list = ", ".join(
-            f'"{table.name}"' for table in Base.metadata.sorted_tables
-        )
+        table_list = ", ".join(f'"{table.name}"' for table in Base.metadata.sorted_tables)
         if table_list:
-            await connection.execute(
-                text(f"TRUNCATE TABLE {table_list} RESTART IDENTITY CASCADE")
-            )
+            await connection.execute(text(f"TRUNCATE TABLE {table_list} RESTART IDENTITY CASCADE"))
 
     sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
     async with sessionmaker() as session:

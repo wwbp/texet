@@ -53,9 +53,7 @@ async def get_or_create_speaker(
 
 
 async def get_or_create_bot_speaker(session: AsyncSession, user_id: str) -> Speaker:
-    return await get_or_create_speaker(
-        session, bot_speaker_id(user_id), meta={"type": "bot"}
-    )
+    return await get_or_create_speaker(session, bot_speaker_id(user_id), meta={"type": "bot"})
 
 
 async def create_conversation(
@@ -115,9 +113,7 @@ async def get_or_create_conversation(
     return conversation
 
 
-async def get_or_create_system_prompt(
-    session: AsyncSession, conversation_id: str
-) -> str:
+async def get_or_create_system_prompt(session: AsyncSession, conversation_id: str) -> str:
     conversation = await session.get(Conversation, conversation_id)
     if not conversation:
         raise ValueError("Conversation not found for system prompt.")

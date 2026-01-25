@@ -40,9 +40,7 @@ from app.response.schemas import (
 )
 
 
-async def _generate_reply(
-    chat_history: list[ChatMessage], query: str, system_prompt: str
-) -> str:
+async def _generate_reply(chat_history: list[ChatMessage], query: str, system_prompt: str) -> str:
     api_key = get_openai_api_key()
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY is not set.")
@@ -99,9 +97,7 @@ async def _run_deferred_reply(
             system_prompt = await get_or_create_system_prompt(
                 session, user_utterance.conversation_id
             )
-            reply_text = await _generate_reply(
-                chat_history, user_utterance.text, system_prompt
-            )
+            reply_text = await _generate_reply(chat_history, user_utterance.text, system_prompt)
 
             bot_utterance = await session.get(Utterance, bot_utterance_id)
             if not bot_utterance:
@@ -131,9 +127,7 @@ async def process_chat(
     meta: dict[str, Any] | None = None,
 ) -> ChatQueuedResponse:
     async with session.begin():
-        speaker = await get_or_create_speaker(
-            session, payload.user_id, meta={"type": "user"}
-        )
+        speaker = await get_or_create_speaker(session, payload.user_id, meta={"type": "user"})
         bot = await get_or_create_bot_speaker(session, payload.user_id)
 
         conversation = await get_or_create_conversation(session, speaker.id)

@@ -4,14 +4,15 @@ Revision ID: 654869edb0b0
 Revises: 7017c70683d8
 Create Date: 2026-01-07 12:03:06.773662
 """
+
 from __future__ import annotations
 
 import sqlalchemy as sa
 
 from alembic import op
 
-revision = '654869edb0b0'
-down_revision = '7017c70683d8'
+revision = "654869edb0b0"
+down_revision = "7017c70683d8"
 branch_labels = None
 depends_on = None
 

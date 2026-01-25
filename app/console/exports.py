@@ -106,9 +106,7 @@ def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
             handle.write("\n")
 
 
-def _verify_corpus_dir(
-    corpus_dir: Path, expected: ExportCounts
-) -> tuple[bool, str | None]:
+def _verify_corpus_dir(corpus_dir: Path, expected: ExportCounts) -> tuple[bool, str | None]:
     utterances_path = corpus_dir / "utterances.jsonl"
     speakers_path = corpus_dir / "speakers.json"
     conversations_path = corpus_dir / "conversations.json"
@@ -165,9 +163,7 @@ async def build_convokit_export(
 
     speakers: list[Speaker] = []
     if speaker_ids:
-        speaker_result = await session.execute(
-            select(Speaker).where(Speaker.id.in_(speaker_ids))
-        )
+        speaker_result = await session.execute(select(Speaker).where(Speaker.id.in_(speaker_ids)))
         speakers = list(speaker_result.scalars().all())
 
     conversations: list[Conversation] = []
@@ -325,11 +321,11 @@ def _render_exports_page(
             for export in exports
         )
     else:
-        rows = "<tr><td colspan=\"10\">No exports yet.</td></tr>"
+        rows = '<tr><td colspan="10">No exports yet.</td></tr>'
 
     error_block = ""
     if error_message:
-        error_block = f"<p class=\"error\">{_escape(error_message)}</p>"
+        error_block = f'<p class="error">{_escape(error_message)}</p>'
 
     html = f"""
     <!doctype html>

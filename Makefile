@@ -1,4 +1,4 @@
-.PHONY: help start down reset check test migration migrate smoke api-key lint fix type audit
+.PHONY: help start down reset check test qa-required migration migrate smoke api-key lint fix type audit
 
 help:
 	@awk 'BEGIN{FS=":.*##"} /^[a-zA-Z_-]+:.*##/{printf "%-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)

@@ -11,9 +11,7 @@ from app.db import get_async_session
 from app.models.auth import ApiKey
 
 
-def _render_api_keys_page(
-    keys: list[ApiKey], generated_key: str | None = None
-) -> HTMLResponse:
+def _render_api_keys_page(keys: list[ApiKey], generated_key: str | None = None) -> HTMLResponse:
     generated_block = ""
     if generated_key:
         generated_block = f"""
@@ -37,7 +35,7 @@ def _render_api_keys_page(
             for key in keys
         )
     else:
-        rows = "<tr><td colspan=\"6\">No API keys yet.</td></tr>"
+        rows = '<tr><td colspan="6">No API keys yet.</td></tr>'
 
     html = f"""
     <!doctype html>
@@ -160,9 +158,7 @@ async def console_api_keys(
     session: AsyncSession = Depends(get_async_session),
     _: None = Depends(require_admin),
 ) -> HTMLResponse:
-    result = await session.execute(
-        select(ApiKey).order_by(ApiKey.created_at.desc()).limit(50)
-    )
+    result = await session.execute(select(ApiKey).order_by(ApiKey.created_at.desc()).limit(50))
     keys = list(result.scalars().all())
     return _render_api_keys_page(keys)
 
@@ -178,8 +174,6 @@ async def console_api_keys_create(
     async with session.begin():
         key = await create_api_key(session, name=name)
 
-    result = await session.execute(
-        select(ApiKey).order_by(ApiKey.created_at.desc()).limit(50)
-    )
+    result = await session.execute(select(ApiKey).order_by(ApiKey.created_at.desc()).limit(50))
     keys = list(result.scalars().all())
     return _render_api_keys_page(keys, generated_key=key)

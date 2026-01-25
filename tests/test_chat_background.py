@@ -42,9 +42,7 @@ async def test_run_deferred_reply_success(
     monkeypatch.setattr(response_service, "_send_sms", _fake_send_sms)
 
     async with async_session.begin():
-        speaker = await get_or_create_speaker(
-            async_session, "u-bg-success", meta={"type": "user"}
-        )
+        speaker = await get_or_create_speaker(async_session, "u-bg-success", meta={"type": "user"})
         bot = await get_or_create_bot_speaker(async_session, "u-bg-success")
         conversation = await get_or_create_conversation(async_session, speaker.id)
         user_utterance = await create_utterance(
@@ -88,9 +86,7 @@ async def test_run_deferred_reply_failure_marks_failed(
     monkeypatch.setattr(response_service, "_generate_reply", _fake_generate_reply)
 
     async with async_session.begin():
-        speaker = await get_or_create_speaker(
-            async_session, "u-bg-fail", meta={"type": "user"}
-        )
+        speaker = await get_or_create_speaker(async_session, "u-bg-fail", meta={"type": "user"})
         bot = await get_or_create_bot_speaker(async_session, "u-bg-fail")
         conversation = await get_or_create_conversation(async_session, speaker.id)
         user_utterance = await create_utterance(
@@ -145,13 +141,9 @@ async def test_send_sms_posts_payload(monkeypatch: pytest.MonkeyPatch) -> None:
             captured["json"] = json
             return _FakeResponse()
 
-    monkeypatch.setattr(
-        response_service, "get_sms_outbound_url", lambda: "https://sms.test"
-    )
+    monkeypatch.setattr(response_service, "get_sms_outbound_url", lambda: "https://sms.test")
     monkeypatch.setattr(response_service, "get_sms_timeout_seconds", lambda: 7.5)
-    monkeypatch.setattr(
-        response_service, "httpx", SimpleNamespace(AsyncClient=_FakeClient)
-    )
+    monkeypatch.setattr(response_service, "httpx", SimpleNamespace(AsyncClient=_FakeClient))
 
     await response_service._send_sms("u1", "hello")
     assert captured["url"] == "https://sms.test"

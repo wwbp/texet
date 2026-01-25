@@ -20,9 +20,7 @@ from app.response.crud import (
 
 @pytest.mark.asyncio
 async def test_create_conversation(async_session: AsyncSession) -> None:
-    speaker = await get_or_create_speaker(
-        async_session, "user-1", meta={"type": "user"}
-    )
+    speaker = await get_or_create_speaker(async_session, "user-1", meta={"type": "user"})
     conversation = await create_conversation(async_session, speaker.id)
     await async_session.commit()
 
@@ -36,9 +34,7 @@ async def test_create_conversation(async_session: AsyncSession) -> None:
 
 @pytest.mark.asyncio
 async def test_get_or_create_conversation_reuses(async_session: AsyncSession) -> None:
-    speaker = await get_or_create_speaker(
-        async_session, "user-1", meta={"type": "user"}
-    )
+    speaker = await get_or_create_speaker(async_session, "user-1", meta={"type": "user"})
     first = await get_or_create_conversation(async_session, speaker.id)
     await async_session.commit()
 
@@ -52,9 +48,7 @@ async def test_get_or_create_conversation_reuses(async_session: AsyncSession) ->
 
 @pytest.mark.asyncio
 async def test_create_utterance_updates_activity(async_session: AsyncSession) -> None:
-    speaker = await get_or_create_speaker(
-        async_session, "user-1", meta={"type": "user"}
-    )
+    speaker = await get_or_create_speaker(async_session, "user-1", meta={"type": "user"})
     conversation = await create_conversation(async_session, speaker.id)
     await async_session.commit()
 
@@ -93,9 +87,7 @@ async def test_create_utterance_updates_activity(async_session: AsyncSession) ->
 async def test_create_utterance_rejects_none_text(
     async_session: AsyncSession,
 ) -> None:
-    speaker = await get_or_create_speaker(
-        async_session, "user-1", meta={"type": "user"}
-    )
+    speaker = await get_or_create_speaker(async_session, "user-1", meta={"type": "user"})
     conversation = await create_conversation(async_session, speaker.id)
     await async_session.commit()
 
@@ -112,9 +104,7 @@ async def test_create_utterance_rejects_none_text(
 async def test_create_utterance_rejects_invalid_status(
     async_session: AsyncSession,
 ) -> None:
-    speaker = await get_or_create_speaker(
-        async_session, "user-1", meta={"type": "user"}
-    )
+    speaker = await get_or_create_speaker(async_session, "user-1", meta={"type": "user"})
     conversation = await create_conversation(async_session, speaker.id)
     await async_session.commit()
 
@@ -130,9 +120,7 @@ async def test_create_utterance_rejects_invalid_status(
 
 @pytest.mark.asyncio
 async def test_create_queued_utterance(async_session: AsyncSession) -> None:
-    speaker = await get_or_create_speaker(
-        async_session, "user-1", meta={"type": "user"}
-    )
+    speaker = await get_or_create_speaker(async_session, "user-1", meta={"type": "user"})
     conversation = await create_conversation(async_session, speaker.id)
     await async_session.commit()
 
@@ -155,9 +143,7 @@ async def test_create_queued_utterance(async_session: AsyncSession) -> None:
 async def test_create_queued_utterance_requires_conversation(
     async_session: AsyncSession,
 ) -> None:
-    speaker = await get_or_create_speaker(
-        async_session, "user-1", meta={"type": "user"}
-    )
+    speaker = await get_or_create_speaker(async_session, "user-1", meta={"type": "user"})
     await async_session.commit()
 
     with pytest.raises(ValueError, match="Conversation not found"):
@@ -172,9 +158,7 @@ async def test_create_queued_utterance_requires_conversation(
 async def test_get_or_create_system_prompt_sets_default(
     async_session: AsyncSession,
 ) -> None:
-    speaker = await get_or_create_speaker(
-        async_session, "user-1", meta={"type": "user"}
-    )
+    speaker = await get_or_create_speaker(async_session, "user-1", meta={"type": "user"})
     conversation = await create_conversation(async_session, speaker.id)
     await async_session.commit()
 
@@ -193,9 +177,7 @@ async def test_get_or_create_system_prompt_sets_default(
 async def test_get_or_create_system_prompt_uses_existing(
     async_session: AsyncSession,
 ) -> None:
-    speaker = await get_or_create_speaker(
-        async_session, "user-2", meta={"type": "user"}
-    )
+    speaker = await get_or_create_speaker(async_session, "user-2", meta={"type": "user"})
     conversation = await create_conversation(
         async_session,
         speaker.id,
@@ -218,9 +200,7 @@ async def test_get_or_create_system_prompt_uses_existing(
 async def test_build_chat_history_orders_roles_and_excludes(
     async_session: AsyncSession,
 ) -> None:
-    speaker = await get_or_create_speaker(
-        async_session, "user-1", meta={"type": "user"}
-    )
+    speaker = await get_or_create_speaker(async_session, "user-1", meta={"type": "user"})
     bot = await get_or_create_bot_speaker(async_session, "user-1")
     conversation = await create_conversation(async_session, speaker.id)
     await async_session.commit()
@@ -271,12 +251,8 @@ async def test_build_chat_history_orders_roles_and_excludes(
 async def test_build_chat_history_filters_by_conversation(
     async_session: AsyncSession,
 ) -> None:
-    speaker_one = await get_or_create_speaker(
-        async_session, "user-1", meta={"type": "user"}
-    )
-    speaker_two = await get_or_create_speaker(
-        async_session, "user-2", meta={"type": "user"}
-    )
+    speaker_one = await get_or_create_speaker(async_session, "user-1", meta={"type": "user"})
+    speaker_two = await get_or_create_speaker(async_session, "user-2", meta={"type": "user"})
     bot_one = await get_or_create_bot_speaker(async_session, "user-1")
     bot_two = await get_or_create_bot_speaker(async_session, "user-2")
     conversation_one = await create_conversation(async_session, speaker_one.id)
@@ -334,9 +310,7 @@ async def test_build_chat_history_filters_by_conversation(
 async def test_build_chat_history_empty_on_first_message(
     async_session: AsyncSession,
 ) -> None:
-    speaker = await get_or_create_speaker(
-        async_session, "user-3", meta={"type": "user"}
-    )
+    speaker = await get_or_create_speaker(async_session, "user-3", meta={"type": "user"})
     bot = await get_or_create_bot_speaker(async_session, "user-3")
     conversation = await create_conversation(async_session, speaker.id)
     await async_session.commit()

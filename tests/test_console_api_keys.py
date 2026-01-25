@@ -60,9 +60,7 @@ async def test_console_api_keys_create(
     key = match.group(0)
 
     async_session.expire_all()
-    result = await async_session.execute(
-        select(ApiKey).where(ApiKey.key_hash == hash_api_key(key))
-    )
+    result = await async_session.execute(select(ApiKey).where(ApiKey.key_hash == hash_api_key(key)))
     api_key = result.scalar_one_or_none()
     assert api_key is not None
     assert api_key.name == "console"

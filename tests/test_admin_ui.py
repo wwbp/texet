@@ -59,9 +59,7 @@ async def test_admin_ui_redirects_without_auth(admin_ui_client: AsyncClient) -> 
         "/console/admin/utterance/list",
     ],
 )
-async def test_admin_ui_lists_with_basic_auth(
-    admin_ui_client: AsyncClient, path: str
-) -> None:
+async def test_admin_ui_lists_with_basic_auth(admin_ui_client: AsyncClient, path: str) -> None:
     headers = _basic_auth_header("admin", "secret")
     response = await admin_ui_client.get(path, headers=headers)
     assert response.status_code == 200

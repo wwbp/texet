@@ -14,9 +14,7 @@ from app.models.base import Base
 class AdminExport(Base):
     __tablename__ = "admin_exports"
 
-    id: Mapped[str] = mapped_column(
-        String(32), primary_key=True, default=lambda: uuid.uuid4().hex
-    )
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
     kind: Mapped[str] = mapped_column(String(32), default="convokit")
     status: Mapped[str] = mapped_column(String(16), default="started")
     range_start: Mapped[datetime.datetime | None] = mapped_column(

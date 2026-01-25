@@ -116,7 +116,5 @@ async def console_docs_redirect(_: None = Depends(require_admin)) -> HTMLRespons
 
 
 @console_router.get("/openapi.json", response_class=JSONResponse)
-async def console_openapi(
-    request: Request, _: None = Depends(require_admin)
-) -> JSONResponse:
+async def console_openapi(request: Request, _: None = Depends(require_admin)) -> JSONResponse:
     return JSONResponse(request.app.openapi())

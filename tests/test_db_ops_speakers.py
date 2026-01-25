@@ -8,9 +8,7 @@ from app.response.crud import bot_speaker_id, get_or_create_bot_speaker, get_or_
 
 @pytest.mark.asyncio
 async def test_get_or_create_speaker(async_session: AsyncSession) -> None:
-    speaker = await get_or_create_speaker(
-        async_session, "user-1", meta={"type": "user"}
-    )
+    speaker = await get_or_create_speaker(async_session, "user-1", meta={"type": "user"})
     await async_session.commit()
 
     fetched = await async_session.get(Speaker, "user-1")

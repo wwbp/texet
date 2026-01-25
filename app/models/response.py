@@ -30,9 +30,7 @@ class Conversation(Base):
         ),
     )
 
-    id: Mapped[str] = mapped_column(
-        String(32), primary_key=True, default=lambda: uuid.uuid4().hex
-    )
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
     owner_speaker_id: Mapped[str] = mapped_column(
         String(128), ForeignKey("speakers.id"), nullable=False
     )
@@ -53,15 +51,11 @@ class Utterance(Base):
         ),
     )
 
-    id: Mapped[str] = mapped_column(
-        String(32), primary_key=True, default=lambda: uuid.uuid4().hex
-    )
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
     conversation_id: Mapped[str] = mapped_column(
         String(32), ForeignKey("conversations.id"), nullable=False
     )
-    speaker_id: Mapped[str] = mapped_column(
-        String(128), ForeignKey("speakers.id"), nullable=False
-    )
+    speaker_id: Mapped[str] = mapped_column(String(128), ForeignKey("speakers.id"), nullable=False)
     reply_to_id: Mapped[str | None] = mapped_column(
         String(32), ForeignKey("utterances.id"), nullable=True
     )

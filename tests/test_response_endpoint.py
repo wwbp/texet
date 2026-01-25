@@ -1,3 +1,4 @@
+import datetime
 from collections.abc import AsyncGenerator
 
 import pytest
@@ -7,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import hash_api_key
 from app.config import (
+    DEFAULT_TIMEZONE,
     UTTERANCE_STATUS_FAILED,
     UTTERANCE_STATUS_RECEIVED,
     UTTERANCE_STATUS_SENT,
@@ -16,15 +18,19 @@ from app.main import app
 from app.models.auth import ApiKey
 from app.models.response import Conversation, Speaker, Utterance
 from app.response import service as response_service
-from app.response.crud import DEFAULT_SYSTEM_PROMPT
+from app.response.crud import (
+    DEFAULT_SYSTEM_PROMPT,
+    create_utterance,
+    get_or_create_bot_speaker,
+    get_or_create_conversation,
+    get_or_create_speaker,
+)
 
 API_KEY = "test-api-key"
 
 
 @pytest.fixture()
-async def async_client(
-    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
-) -> AsyncClient:
+async def async_client(async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> AsyncClient:
     monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
     monkeypatch.setenv("OPENAI_MODEL", "gpt-4o-mini")
 
@@ -66,10 +72,15 @@ def kani_stub(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
     async def _fake_generate_reply(
         chat_history: list[object], query: str, system_prompt: str
     ) -> str:
+        history = [
+            (msg.role.value, msg.content)  # type: ignore[attr-defined]
+            for msg in chat_history
+        ]
         calls.append(
             {
                 "query": query,
                 "history_len": len(chat_history),
+                "history": history,
                 "system_prompt": system_prompt,
             }
         )
@@ -187,17 +198,13 @@ async def test_response_success_persists(
         {"user_id": "u1", "message": "reply:again"},
     ]
     assert kani_stub[-1]["system_prompt"] == DEFAULT_SYSTEM_PROMPT
+    assert kani_stub[0]["history"] == []
+    assert kani_stub[1]["history"] == [("user", "hello"), ("assistant", "reply:hello")]
 
     async_session.expire_all()
-    speaker_count = await async_session.execute(
-        select(func.count()).select_from(Speaker)
-    )
-    conversation_count = await async_session.execute(
-        select(func.count()).select_from(Conversation)
-    )
-    utterance_count = await async_session.execute(
-        select(func.count()).select_from(Utterance)
-    )
+    speaker_count = await async_session.execute(select(func.count()).select_from(Speaker))
+    conversation_count = await async_session.execute(select(func.count()).select_from(Conversation))
+    utterance_count = await async_session.execute(select(func.count()).select_from(Utterance))
 
     assert speaker_count.scalar_one() == 2
     assert conversation_count.scalar_one() == 1
@@ -212,11 +219,49 @@ async def test_response_success_persists(
         UTTERANCE_STATUS_SENT: 2,
     }
 
-    key_result = await async_session.execute(
-        select(ApiKey).where(ApiKey.name == "test-key")
-    )
+    key_result = await async_session.execute(select(ApiKey).where(ApiKey.name == "test-key"))
     api_key = key_result.scalar_one()
     assert api_key.last_used_at is not None
+
+
+@pytest.mark.asyncio
+async def test_response_reuses_existing_conversation_history(
+    async_client: AsyncClient,
+    async_session: AsyncSession,
+    kani_stub: list[dict[str, object]],
+) -> None:
+    async with async_session.begin():
+        speaker = await get_or_create_speaker(async_session, "u-existing", meta={"type": "user"})
+        bot = await get_or_create_bot_speaker(async_session, "u-existing")
+        conversation = await get_or_create_conversation(async_session, speaker.id)
+        user_utterance = await create_utterance(
+            async_session,
+            conversation.id,
+            speaker.id,
+            "hello",
+        )
+        bot_utterance = await create_utterance(
+            async_session,
+            conversation.id,
+            bot.id,
+            "hi",
+            reply_to_id=user_utterance.id,
+        )
+        base = datetime.datetime(2026, 1, 1, tzinfo=DEFAULT_TIMEZONE)
+        user_utterance.timestamp = base
+        bot_utterance.timestamp = base + datetime.timedelta(seconds=1)
+
+    response = await async_client.post(
+        "/response",
+        headers={"Authorization": f"Bearer {API_KEY}"},
+        json={"user_id": "u-existing", "input": "follow-up"},
+    )
+    assert response.status_code == 202
+    body = response.json()
+    assert body["conversation_id"] == conversation.id
+
+    last = kani_stub[-1]
+    assert last["history"] == [("user", "hello"), ("assistant", "hi")]
 
 
 @pytest.mark.asyncio
@@ -224,6 +269,7 @@ async def test_response_multiple_users_interleaved(
     async_client: AsyncClient,
     async_session: AsyncSession,
     sms_outbox: list[dict[str, str]],
+    kani_stub: list[dict[str, object]],
 ) -> None:
     desired_counts = {"u1": 3, "u2": 5, "u3": 7}
     order = [
@@ -266,26 +312,21 @@ async def test_response_multiple_users_interleaved(
     assert seen == desired_counts
     assert len(set(conversation_ids.values())) == 3
 
-    assert len(sms_outbox) == sum(desired_counts.values())
+    total_requests = sum(desired_counts.values())
+    assert len(sms_outbox) == total_requests
+    assert len(kani_stub) == total_requests
 
     async_session.expire_all()
-    speaker_count = await async_session.execute(
-        select(func.count()).select_from(Speaker)
-    )
-    conversation_count = await async_session.execute(
-        select(func.count()).select_from(Conversation)
-    )
-    utterance_count = await async_session.execute(
-        select(func.count()).select_from(Utterance)
-    )
+    speaker_count = await async_session.execute(select(func.count()).select_from(Speaker))
+    conversation_count = await async_session.execute(select(func.count()).select_from(Conversation))
+    utterance_count = await async_session.execute(select(func.count()).select_from(Utterance))
 
     assert speaker_count.scalar_one() == 6
     assert conversation_count.scalar_one() == 3
     assert utterance_count.scalar_one() == sum(desired_counts.values()) * 2
 
     per_convo = await async_session.execute(
-        select(Utterance.conversation_id, func.count())
-        .group_by(Utterance.conversation_id)
+        select(Utterance.conversation_id, func.count()).group_by(Utterance.conversation_id)
     )
     counts_by_convo = {row[0]: row[1] for row in per_convo.all()}
     assert counts_by_convo == {
@@ -293,6 +334,39 @@ async def test_response_multiple_users_interleaved(
         conversation_ids["u2"]: 10,
         conversation_ids["u3"]: 14,
     }
+
+    expected_history_len: dict[str, int] = {"u1": 0, "u2": 0, "u3": 0}
+    for call in kani_stub:
+        query = call["query"]
+        assert isinstance(query, str)
+        parts = query.split("-")
+        assert len(parts) >= 3
+        user_id = parts[1]
+        assert user_id in expected_history_len
+        assert call["history_len"] == expected_history_len[user_id]
+        history = call["history"]
+        assert isinstance(history, list)
+        for role, content in history:
+            assert isinstance(role, str)
+            assert isinstance(content, str)
+            assert f"-{user_id}-" in content
+        expected_history_len[user_id] += 2
+
+    utterance_rows = await async_session.execute(
+        select(Utterance).where(Utterance.conversation_id.in_(conversation_ids.values()))
+    )
+    utterances = list(utterance_rows.scalars().all())
+    utterances_by_id = {utterance.id: utterance for utterance in utterances}
+    for utterance in utterances:
+        if utterance.speaker_id.startswith("bot:"):
+            assert utterance.reply_to_id is not None
+            replied = utterances_by_id[utterance.reply_to_id]
+            assert not replied.speaker_id.startswith("bot:")
+            assert replied.conversation_id == utterance.conversation_id
+            assert utterance.status == UTTERANCE_STATUS_SENT
+            assert utterance.error is None
+        else:
+            assert utterance.status == UTTERANCE_STATUS_RECEIVED
 
 
 @pytest.mark.asyncio
