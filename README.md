@@ -25,7 +25,7 @@ Use the console to monitor data, manage API access, and export datasets.
 - Admin views (read-only): `/console/admin` (speakers, conversations, utterances)
 - API keys: `/console/api-keys` (create keys; shown once)
 - Exports: `/console/exports` (download ConvoKit corpora; ConvoKit is a conversation dataset format)
-- API docs: `/console/docs` (interactive docs; uses live environment)
+- API docs: `/console/docs` (interactive docs; try it out)
 
 Notes:
 
