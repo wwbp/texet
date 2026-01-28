@@ -136,9 +136,15 @@ async def test_send_sms_posts_payload(monkeypatch: pytest.MonkeyPatch) -> None:
         async def __aexit__(self, exc_type, exc, tb) -> bool:
             return False
 
-        async def post(self, url: str, json: dict[str, str]) -> _FakeResponse:
+        async def post(
+            self,
+            url: str,
+            json: dict[str, str],
+            headers: dict[str, str] | None = None,
+        ) -> _FakeResponse:
             captured["url"] = url
             captured["json"] = json
+            captured["headers"] = headers
             return _FakeResponse()
 
     monkeypatch.setattr(response_service, "get_sms_outbound_url", lambda: "https://sms.test")
@@ -147,7 +153,12 @@ async def test_send_sms_posts_payload(monkeypatch: pytest.MonkeyPatch) -> None:
 
     await response_service._send_sms("u1", "hello")
     assert captured["url"] == "https://sms.test"
-    assert captured["json"] == {"user_id": "u1", "message": "hello"}
+    assert captured["json"] == {
+        "participant_id": "u1",
+        "message": "hello",
+        "message_type": "sent",
+    }
+    assert captured["headers"] == {"Authorization": "Bearer Secure_pa$$word"}
     assert captured["timeout"] == 7.5
 
 

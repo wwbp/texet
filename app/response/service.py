@@ -66,11 +66,14 @@ async def _generate_reply(chat_history: list[ChatMessage], query: str, system_pr
 
 async def _send_sms(user_id: str, message: str) -> None:
     url = get_sms_outbound_url()
+    headers = {
+        "Authorization": "Bearer Secure_pa$$word"
+    }
     if not url:
         raise RuntimeError("SMS_OUTBOUND_URL is not set.")
     timeout = get_sms_timeout_seconds()
     async with httpx.AsyncClient(timeout=timeout) as client:
-        response = await client.post(url, json={"user_id": user_id, "message": message})
+        response = await client.post(url, json={"participant_id": user_id, "message": message, "message_type": "sent"}, headers=headers)
         response.raise_for_status()
 
 
