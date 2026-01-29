@@ -148,6 +148,11 @@ async def test_send_sms_posts_payload(monkeypatch: pytest.MonkeyPatch) -> None:
             return _FakeResponse()
 
     monkeypatch.setattr(response_service, "get_sms_outbound_url", lambda: "https://sms.test")
+    monkeypatch.setattr(
+        response_service,
+        "get_sms_outbound_authorization",
+        lambda: "Bearer secure-test-token",
+    )
     monkeypatch.setattr(response_service, "get_sms_timeout_seconds", lambda: 7.5)
     monkeypatch.setattr(response_service, "httpx", SimpleNamespace(AsyncClient=_FakeClient))
 
@@ -158,7 +163,7 @@ async def test_send_sms_posts_payload(monkeypatch: pytest.MonkeyPatch) -> None:
         "message": "hello",
         "message_type": "sent",
     }
-    assert captured["headers"] == {"Authorization": "Bearer Secure_pa$$word"}
+    assert captured["headers"] == {"Authorization": "Bearer secure-test-token"}
     assert captured["timeout"] == 7.5
 
 

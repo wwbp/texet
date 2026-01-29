@@ -82,6 +82,7 @@ Package management (uv) below.
 2) Edit `.env.api` and set:
    - `OPENAI_API_KEY` and `OPENAI_MODEL` (example: `gpt-4o-mini`).
    - `SMS_OUTBOUND_URL` to your SMS webhook endpoint (for testing, a request bin works).
+   - `SMS_OUTBOUND_AUTHORIZATION` if your SMS webhook expects an Authorization header.
    - If you change DB creds in `.env.db`, update `DATABASE_URL` and `DATABASE_URL_TEST`
      in `.env.api` to match.
 
@@ -158,6 +159,7 @@ Client auth:
 Optional:
 
 - `SMS_TIMEOUT_SECONDS` - outbound HTTP timeout in seconds (default `15`).
+- `SMS_OUTBOUND_AUTHORIZATION` - Authorization header value for outbound SMS (e.g., `Bearer <token>`).
 - `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_SECRET_KEY` - enable console (admin UI).
 - `ADMIN_SESSION_TTL_SECONDS` - console/admin login session lifetime in seconds (default `28800`).
 

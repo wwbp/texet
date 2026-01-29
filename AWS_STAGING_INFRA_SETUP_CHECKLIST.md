@@ -52,6 +52,7 @@ For the actual run, use a private/internal document.
 
 Optional:
 
+- [ ] `SMS_OUTBOUND_AUTHORIZATION`
 - [ ] `SMS_TIMEOUT_SECONDS`
 - [ ] `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_SECRET_KEY`
 - [ ] `ADMIN_SESSION_TTL_SECONDS`

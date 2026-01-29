@@ -37,10 +37,10 @@ app = FastAPI(
     openapi_url=None,
 )
 
-VISIBLE_OPENAPI_PATHS = {"/response", "/health", "/db/health"}
+OPENAPI_DOCS_PATH_WHITELIST = {"/response", "/health", "/db/health"}
 
 
-def custom_openapi() -> dict[str, object]:
+def openapi_schema_for_docs() -> dict[str, object]:
     if app.openapi_schema:
         return app.openapi_schema
     schema = get_openapi(
@@ -51,13 +51,13 @@ def custom_openapi() -> dict[str, object]:
     )
     paths = schema.get("paths", {})
     schema["paths"] = {
-        path: value for path, value in paths.items() if path in VISIBLE_OPENAPI_PATHS
+        path: value for path, value in paths.items() if path in OPENAPI_DOCS_PATH_WHITELIST
     }
     app.openapi_schema = schema
     return schema
 
 
-app.openapi = custom_openapi  # type: ignore[method-assign]
+app.openapi = openapi_schema_for_docs  # type: ignore[method-assign]
 
 if admin_enabled():
     admin_secret = get_admin_secret_key()

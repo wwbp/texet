@@ -8,6 +8,11 @@ def get_sms_outbound_url() -> str:
     return os.getenv("SMS_OUTBOUND_URL", "")
 
 
+# SMS_OUTBOUND_AUTHORIZATION: Authorization header value for outbound SMS requests.
+def get_sms_outbound_authorization() -> str:
+    return os.getenv("SMS_OUTBOUND_AUTHORIZATION", "")
+
+
 # SMS_TIMEOUT_SECONDS: outbound HTTP timeout in seconds.
 def get_sms_timeout_seconds() -> float:
     value = os.getenv("SMS_TIMEOUT_SECONDS")

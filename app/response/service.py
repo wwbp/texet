@@ -18,6 +18,7 @@ from app.config import (
     UTTERANCE_STATUS_SENT,
     get_openai_api_key,
     get_openai_model,
+    get_sms_outbound_authorization,
     get_sms_outbound_url,
     get_sms_timeout_seconds,
 )
@@ -66,14 +67,18 @@ async def _generate_reply(chat_history: list[ChatMessage], query: str, system_pr
 
 async def _send_sms(user_id: str, message: str) -> None:
     url = get_sms_outbound_url()
-    headers = {
-        "Authorization": "Bearer Secure_pa$$word"
-    }
     if not url:
         raise RuntimeError("SMS_OUTBOUND_URL is not set.")
+    auth_header = get_sms_outbound_authorization()
+    headers = {"Authorization": auth_header} if auth_header else None
     timeout = get_sms_timeout_seconds()
     async with httpx.AsyncClient(timeout=timeout) as client:
-        response = await client.post(url, json={"participant_id": user_id, "message": message, "message_type": "sent"}, headers=headers)
+        payload = {
+            "participant_id": user_id,
+            "message": message,
+            "message_type": "sent",
+        }
+        response = await client.post(url, json=payload, headers=headers)
         response.raise_for_status()
 
 
