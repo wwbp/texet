@@ -15,7 +15,7 @@ from app.config import (
     UTTERANCE_STATUS_RECEIVED,
     UTTERANCE_STATUSES,
 )
-from app.models.response import Conversation, Speaker, Utterance
+from app.models.response import Conversation, Speaker, SystemPrompt, Utterance
 
 DEFAULT_SYSTEM_PROMPT = "you are a helful assistant."
 
@@ -113,21 +113,18 @@ async def get_or_create_conversation(
     return conversation
 
 
-async def get_or_create_system_prompt(session: AsyncSession, conversation_id: str) -> str:
-    conversation = await session.get(Conversation, conversation_id)
-    if not conversation:
-        raise ValueError("Conversation not found for system prompt.")
+async def get_or_create_system_prompt(session: AsyncSession) -> str:
+    result = await session.execute(
+        select(SystemPrompt).order_by(SystemPrompt.created_at.desc()).limit(1)
+    )
+    prompt = result.scalar_one_or_none()
+    if not prompt:
+        return DEFAULT_SYSTEM_PROMPT
 
-    meta = conversation.meta or {}
-    prompt = meta.get("system_prompt")
-    if isinstance(prompt, str) and prompt.strip():
-        return prompt
-
-    meta = dict(meta)
-    meta["system_prompt"] = DEFAULT_SYSTEM_PROMPT
-    conversation.meta = meta
-    await session.flush()
-    return DEFAULT_SYSTEM_PROMPT
+    value = prompt.prompt.strip()
+    if not value:
+        return DEFAULT_SYSTEM_PROMPT
+    return value
 
 
 async def build_chat_history(

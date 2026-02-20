@@ -102,9 +102,7 @@ async def _run_deferred_reply(
                 exclude_utterance_id=user_utterance.id,
             )
 
-            system_prompt = await get_or_create_system_prompt(
-                session, user_utterance.conversation_id
-            )
+            system_prompt = await get_or_create_system_prompt(session)
             reply_text = await _generate_reply(chat_history, user_utterance.text, system_prompt)
 
             bot_utterance = await session.get(Utterance, bot_utterance_id)

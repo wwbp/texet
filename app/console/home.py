@@ -82,6 +82,11 @@ async def console_root(_: None = Depends(require_admin)) -> HTMLResponse:
               <h2>API Keys</h2>
               <p>Create and rotate keys for internal teams.</p>
             </a>
+            <a class="card" href="{CONSOLE_PREFIX}/system-prompts">
+              <span>Assistant</span>
+              <h2>System Prompts</h2>
+              <p>Add, update, and delete prompts. Latest created prompt is active.</p>
+            </a>
             <a class="card" href="{CONSOLE_PREFIX}/exports">
               <span>Data</span>
               <h2>Exports</h2>

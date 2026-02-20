@@ -1,4 +1,4 @@
-from app.console import api_keys, exports, home  # noqa: F401
+from app.console import api_keys, exports, home, system_prompts  # noqa: F401
 from app.console.admin_ui import init_console
 from app.console.core import console_router
 

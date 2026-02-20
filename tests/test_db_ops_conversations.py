@@ -5,8 +5,9 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import DEFAULT_TIMEZONE, UTTERANCE_STATUS_QUEUED, UTTERANCE_STATUS_RECEIVED
-from app.models.response import Conversation, Utterance
+from app.models.response import Conversation, SystemPrompt, Utterance
 from app.response.crud import (
+    DEFAULT_SYSTEM_PROMPT,
     build_chat_history,
     create_conversation,
     create_queued_utterance,
@@ -158,42 +159,44 @@ async def test_create_queued_utterance_requires_conversation(
 async def test_get_or_create_system_prompt_sets_default(
     async_session: AsyncSession,
 ) -> None:
-    speaker = await get_or_create_speaker(async_session, "user-1", meta={"type": "user"})
-    conversation = await create_conversation(async_session, speaker.id)
-    await async_session.commit()
-
-    prompt = await get_or_create_system_prompt(async_session, conversation.id)
-    await async_session.commit()
-
-    assert prompt == "you are a helful assistant."
-
-    refreshed = await async_session.get(Conversation, conversation.id)
-    assert refreshed is not None
-    assert refreshed.meta is not None
-    assert refreshed.meta.get("system_prompt") == "you are a helful assistant."
+    prompt = await get_or_create_system_prompt(async_session)
+    assert prompt == DEFAULT_SYSTEM_PROMPT
 
 
 @pytest.mark.asyncio
-async def test_get_or_create_system_prompt_uses_existing(
+async def test_get_or_create_system_prompt_uses_latest_created(
     async_session: AsyncSession,
 ) -> None:
-    speaker = await get_or_create_speaker(async_session, "user-2", meta={"type": "user"})
-    conversation = await create_conversation(
-        async_session,
-        speaker.id,
-        meta={"system_prompt": "custom prompt"},
+    base = datetime.datetime(2026, 1, 1, tzinfo=DEFAULT_TIMEZONE)
+    first = SystemPrompt(prompt="first", created_at=base)
+    second = SystemPrompt(prompt="second", created_at=base + datetime.timedelta(seconds=1))
+    async_session.add_all([first, second])
+    await async_session.commit()
+
+    prompt = await get_or_create_system_prompt(async_session)
+    assert prompt == "second"
+
+    async_session.add(
+        SystemPrompt(prompt="third", created_at=base + datetime.timedelta(seconds=2))
     )
     await async_session.commit()
 
-    prompt = await get_or_create_system_prompt(async_session, conversation.id)
-    await async_session.commit()
+    latest = await get_or_create_system_prompt(async_session)
+    assert latest == "third"
 
-    assert prompt == "custom prompt"
 
-    refreshed = await async_session.get(Conversation, conversation.id)
-    assert refreshed is not None
-    assert refreshed.meta is not None
-    assert refreshed.meta.get("system_prompt") == "custom prompt"
+@pytest.mark.asyncio
+async def test_get_or_create_system_prompt_propagates_query_error(
+    async_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _boom(*_: object, **__: object) -> object:
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(async_session, "execute", _boom)
+
+    with pytest.raises(RuntimeError, match="db down"):
+        await get_or_create_system_prompt(async_session)
 
 
 @pytest.mark.asyncio

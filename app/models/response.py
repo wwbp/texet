@@ -69,3 +69,10 @@ class Utterance(Base):
     text: Mapped[str | None] = mapped_column(Text, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     meta: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+
+
+class SystemPrompt(Base):
+    __tablename__ = "system_prompts"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
+    prompt: Mapped[str] = mapped_column(Text, nullable=False)
