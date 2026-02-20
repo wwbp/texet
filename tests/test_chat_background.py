@@ -34,9 +34,10 @@ async def test_run_deferred_reply_success(
 
     sent: dict[str, str] = {}
 
-    async def _fake_send_sms(user_id: str, message: str) -> None:
+    async def _fake_send_sms(user_id: str, message: str, utterance_id: str) -> None:
         sent["user_id"] = user_id
         sent["message"] = message
+        sent["utterance_id"] = utterance_id
 
     monkeypatch.setattr(response_service, "_generate_reply", _fake_generate_reply)
     monkeypatch.setattr(response_service, "_send_sms", _fake_send_sms)
@@ -73,7 +74,11 @@ async def test_run_deferred_reply_success(
     assert refreshed.status == UTTERANCE_STATUS_SENT
     assert refreshed.text == "ok"
     assert refreshed.error is None
-    assert sent == {"user_id": "u-bg-success", "message": "ok"}
+    assert sent == {
+        "user_id": "u-bg-success",
+        "message": "ok",
+        "utterance_id": bot_utterance_id,
+    }
 
 
 @pytest.mark.asyncio
@@ -156,12 +161,13 @@ async def test_send_sms_posts_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(response_service, "get_sms_timeout_seconds", lambda: 7.5)
     monkeypatch.setattr(response_service, "httpx", SimpleNamespace(AsyncClient=_FakeClient))
 
-    await response_service._send_sms("u1", "hello")
+    await response_service._send_sms("u1", "hello", "utt-1")
     assert captured["url"] == "https://sms.test"
     assert captured["json"] == {
         "participant_id": "u1",
         "message": "hello",
         "message_type": "sent",
+        "utterance_id": "utt-1",
     }
     assert captured["headers"] == {"Authorization": "Bearer secure-test-token"}
     assert captured["timeout"] == 7.5
@@ -171,4 +177,4 @@ async def test_send_sms_posts_payload(monkeypatch: pytest.MonkeyPatch) -> None:
 async def test_send_sms_requires_url(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(response_service, "get_sms_outbound_url", lambda: "")
     with pytest.raises(RuntimeError):
-        await response_service._send_sms("u1", "hello")
+        await response_service._send_sms("u1", "hello", "utt-1")

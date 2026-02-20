@@ -58,8 +58,10 @@ async def async_client(async_session: AsyncSession, monkeypatch: pytest.MonkeyPa
 def sms_outbox(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, str]]:
     outbox: list[dict[str, str]] = []
 
-    async def _fake_send_sms(user_id: str, message: str) -> None:
-        outbox.append({"user_id": user_id, "message": message})
+    async def _fake_send_sms(user_id: str, message: str, utterance_id: str) -> None:
+        outbox.append(
+            {"user_id": user_id, "message": message, "utterance_id": utterance_id}
+        )
 
     monkeypatch.setattr(response_service, "_send_sms", _fake_send_sms)
     return outbox
@@ -140,7 +142,10 @@ async def test_response_allows_empty_input(
         json={"user_id": "u-empty", "input": ""},
     )
     assert response.status_code == 202
-    assert sms_outbox == [{"user_id": "u-empty", "message": "reply:"}]
+    body = response.json()
+    assert sms_outbox == [
+        {"user_id": "u-empty", "message": "reply:", "utterance_id": body["id"]}
+    ]
 
 
 @pytest.mark.asyncio
@@ -156,9 +161,11 @@ async def test_response_allows_large_input(
     )
     assert response.status_code == 202
     assert len(sms_outbox) == 1
+    body = response.json()
     assert sms_outbox[0]["user_id"] == "u-large"
     assert sms_outbox[0]["message"].startswith("reply:")
     assert len(sms_outbox[0]["message"]) == len(message) + 6
+    assert sms_outbox[0]["utterance_id"] == body["id"]
 
 
 @pytest.mark.asyncio
@@ -194,8 +201,8 @@ async def test_response_success_persists(
     assert second_body["conversation_id"] == first_body["conversation_id"]
 
     assert sms_outbox == [
-        {"user_id": "u1", "message": "reply:hello"},
-        {"user_id": "u1", "message": "reply:again"},
+        {"user_id": "u1", "message": "reply:hello", "utterance_id": first_body["id"]},
+        {"user_id": "u1", "message": "reply:again", "utterance_id": second_body["id"]},
     ]
     assert kani_stub[-1]["system_prompt"] == DEFAULT_SYSTEM_PROMPT
     assert kani_stub[0]["history"] == []
@@ -405,7 +412,7 @@ async def test_response_marks_failed_on_sms_error(
     async_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def _fail_send_sms(user_id: str, message: str) -> None:
+    async def _fail_send_sms(user_id: str, message: str, utterance_id: str) -> None:
         raise RuntimeError("sms gateway down")
 
     monkeypatch.setattr(response_service, "_send_sms", _fail_send_sms)

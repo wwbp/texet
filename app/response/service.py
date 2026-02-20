@@ -65,7 +65,7 @@ async def _generate_reply(chat_history: list[ChatMessage], query: str, system_pr
     return cast(str, reply.text)
 
 
-async def _send_sms(user_id: str, message: str) -> None:
+async def _send_sms(user_id: str, message: str, utterance_id: str) -> None:
     url = get_sms_outbound_url()
     if not url:
         raise RuntimeError("SMS_OUTBOUND_URL is not set.")
@@ -77,6 +77,7 @@ async def _send_sms(user_id: str, message: str) -> None:
             "participant_id": user_id,
             "message": message,
             "message_type": "sent",
+            "utterance_id": utterance_id,
         }
         response = await client.post(url, json=payload, headers=headers)
         response.raise_for_status()
@@ -112,7 +113,7 @@ async def _run_deferred_reply(
             bot_utterance.error = None
             await session.commit()
 
-            await _send_sms(user_id, reply_text)
+            await _send_sms(user_id, reply_text, bot_utterance_id)
 
             bot_utterance.status = UTTERANCE_STATUS_SENT
             await session.commit()
