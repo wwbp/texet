@@ -2,11 +2,12 @@
 
 ## What runs on GitHub
 
-- Workflow file: `.github/workflows/ci-cd.yml`
+- CI workflow file: `.github/workflows/ci.yml`
+- CD workflow file: `.github/workflows/cd.yml`
 Triggers:
-- `pull_request`: run CI only.
-- `push` to `main`: run CI, then deploy if CI passes.
-- `workflow_dispatch`: optional manual run.
+- `pull_request`: run CI.
+- `push` to `main`: run CI.
+- CD is triggered by successful CI for `push` to `main` (`workflow_run`).
 
 ## CI (tests)
 

@@ -1,70 +1,23 @@
-name: CI/CD
+name: CD
 
 on:
-  workflow_dispatch:
-  pull_request:
-  push:
-    branches:
-      - main
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
 
 permissions:
   contents: read
 
 jobs:
-  ci:
-    name: Run Tests
-    runs-on: ubuntu-latest
-
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_DB: texet
-          POSTGRES_USER: texet
-          POSTGRES_PASSWORD: texet_ci_password
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U texet -d texet"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 20
-
-    env:
-      DATABASE_URL: postgresql+asyncpg://texet:texet_ci_password@127.0.0.1:5432/texet
-      DATABASE_URL_TEST: postgresql+asyncpg://texet:texet_ci_password@127.0.0.1:5432/texet_test
-      OPENAI_API_KEY: ci-test-key
-      OPENAI_MODEL: gpt-4o-mini
-      SMS_OUTBOUND_URL: ""
-      ADMIN_USERNAME: admin
-      ADMIN_PASSWORD: admin
-      ADMIN_SECRET_KEY: ci-admin-secret
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-
-      - name: Install dependencies
-        run: uv sync --frozen
-
-      - name: Run tests with coverage
-        run: uv run pytest --cov
-
   deploy_backend:
     name: Deploy Backend to Elastic Beanstalk
+    if: |
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
     runs-on: ubuntu-latest
-    needs: ci
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     environment: production
     concurrency:
       group: eb-production-deploy
@@ -79,6 +32,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -93,7 +48,7 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           application-name: ${{ secrets.AWS_BACKEND_APPLICATION_NAME }}
           environment-name: ${{ secrets.AWS_PROD_BACKEND_ENVIRONMENT_NAME }}
-          version-label: ${{ github.sha }}
+          version-label: ${{ github.event.workflow_run.head_sha }}
           wait-for-deployment: true
           wait-for-environment-recovery: true
           exclude-patterns: docker-compose.yml
@@ -105,10 +60,9 @@ jobs:
           DEPLOYED_VERSION: ${{ steps.eb_deploy.outputs['version-label'] }}
           DEPLOYED_STATUS: ${{ steps.eb_deploy.outputs['environment-status'] }}
           DEPLOYED_HEALTH: ${{ steps.eb_deploy.outputs['environment-health'] }}
-          TARGET_VERSION: ${{ github.sha }}
+          TARGET_VERSION: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
-
           echo "Deployed version=${DEPLOYED_VERSION}, status=${DEPLOYED_STATUS}, health=${DEPLOYED_HEALTH}"
           test "${DEPLOYED_VERSION}" = "${TARGET_VERSION}"
           test "${DEPLOYED_STATUS}" = "Ready"
