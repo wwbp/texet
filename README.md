@@ -283,6 +283,12 @@ uses Docker Compose; use `uv` when you need to add/upgrade packages or run local
 - `make migration name=...` creates a new Alembic revision (requires the DB running).
 - `make migrate` applies Alembic migrations (requires the DB running).
 
+### CI/CD
+
+- Workflow: `.github/workflows/ci-cd.yml`
+- Quick onboarding and maintenance guide: `docs/ci-cd.md`
+- Production runbook (developers, operators, researchers, students): `docs/operations-playbook.md`
+
 ## Notes
 
 - Do not commit `.env` files or real API keys. Rotate any keys that have been shared.

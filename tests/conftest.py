@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import os
+import socket
+from collections.abc import Generator
 from pathlib import Path
 
 import asyncpg
@@ -36,6 +39,58 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 _load_env_file(PROJECT_ROOT / ".env.api")
 _load_env_file(PROJECT_ROOT / ".env.db")
+
+
+def _allowed_test_hosts() -> set[str]:
+    hosts = {"localhost", "127.0.0.1", "::1", "db"}
+    for env_name in ("DATABASE_URL_TEST", "DATABASE_URL"):
+        raw_url = os.getenv(env_name)
+        if not raw_url:
+            continue
+        parsed = make_url(raw_url)
+        if parsed.host:
+            hosts.add(parsed.host)
+    return {host.lower() for host in hosts}
+
+
+def _is_allowed_host(host: object, allowed_hosts: set[str]) -> bool:
+    if host is None:
+        return True
+    if isinstance(host, bytes):
+        host = host.decode("utf-8", errors="ignore")
+    if not isinstance(host, str):
+        return True
+
+    normalized = host.strip().lower()
+    if not normalized:
+        return True
+    if normalized in allowed_hosts:
+        return True
+
+    try:
+        ip = ipaddress.ip_address(normalized)
+    except ValueError:
+        return False
+    return ip.is_loopback
+
+
+@pytest.fixture(scope="session", autouse=True)
+def block_external_network() -> Generator[None, None, None]:
+    """Block accidental internet calls while allowing local/test DB traffic."""
+
+    allowed_hosts = _allowed_test_hosts()
+    real_getaddrinfo = socket.getaddrinfo
+
+    def guarded_getaddrinfo(host: object, *args: object, **kwargs: object) -> object:
+        if _is_allowed_host(host, allowed_hosts):
+            return real_getaddrinfo(host, *args, **kwargs)
+        raise RuntimeError(f"External network access is blocked during tests: host={host!r}")
+
+    socket.getaddrinfo = guarded_getaddrinfo
+    try:
+        yield
+    finally:
+        socket.getaddrinfo = real_getaddrinfo
 
 
 async def _ensure_test_db(database_url: str, reset: bool = False) -> None:
