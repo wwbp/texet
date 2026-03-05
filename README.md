@@ -285,7 +285,9 @@ uses Docker Compose; use `uv` when you need to add/upgrade packages or run local
 
 ### CI/CD
 
-- Workflow: `.github/workflows/ci-cd.yml`
+- Workflows:
+  - `.github/workflows/ci.yml`
+  - `.github/workflows/cd.yml`
 - Quick onboarding and maintenance guide: `docs/ci-cd.md`
 - Production runbook (developers, operators, researchers, students): `docs/operations-playbook.md`
 

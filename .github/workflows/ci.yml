@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: Run Tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: texet
+          POSTGRES_USER: texet
+          POSTGRES_PASSWORD: texet_ci_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U texet -d texet"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://texet:texet_ci_password@127.0.0.1:5432/texet
+      DATABASE_URL_TEST: postgresql+asyncpg://texet:texet_ci_password@127.0.0.1:5432/texet_test
+      OPENAI_API_KEY: ci-test-key
+      OPENAI_MODEL: gpt-4o-mini
+      SMS_OUTBOUND_URL: ""
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD: admin
+      ADMIN_SECRET_KEY: ci-admin-secret
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Run tests with coverage
+        run: uv run pytest --cov

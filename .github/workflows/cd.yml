@@ -1,0 +1,97 @@
+name: CD
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+
+permissions:
+  contents: read
+
+jobs:
+  deploy_backend:
+    name: Deploy Backend to Elastic Beanstalk
+    if: |
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: eb-production-deploy
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+
+    env:
+      AWS_REGION: us-east-1
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/${{ secrets.AWS_ROLE_NAME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy to Elastic Beanstalk
+        id: eb_deploy
+        uses: aws-actions/aws-elasticbeanstalk-deploy@v1.0.0
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          application-name: ${{ secrets.AWS_BACKEND_APPLICATION_NAME }}
+          environment-name: ${{ secrets.AWS_PROD_BACKEND_ENVIRONMENT_NAME }}
+          version-label: ${{ github.event.workflow_run.head_sha }}
+          wait-for-deployment: true
+          wait-for-environment-recovery: true
+          exclude-patterns: docker-compose.yml
+          create-application-if-not-exists: false
+          create-environment-if-not-exists: false
+
+      - name: Assert EB deployment state
+        env:
+          DEPLOYED_VERSION: ${{ steps.eb_deploy.outputs['version-label'] }}
+          DEPLOYED_STATUS: ${{ steps.eb_deploy.outputs['environment-status'] }}
+          DEPLOYED_HEALTH: ${{ steps.eb_deploy.outputs['environment-health'] }}
+          TARGET_VERSION: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          echo "Deployed version=${DEPLOYED_VERSION}, status=${DEPLOYED_STATUS}, health=${DEPLOYED_HEALTH}"
+          test "${DEPLOYED_VERSION}" = "${TARGET_VERSION}"
+          test "${DEPLOYED_STATUS}" = "Ready"
+          test "${DEPLOYED_HEALTH}" = "Green"
+
+      - name: Smoke test deployed /health endpoint
+        env:
+          ENV_URL: ${{ steps.eb_deploy.outputs['environment-url'] }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${ENV_URL}" ] || [ "${ENV_URL}" = "None" ]; then
+            echo "No environment URL returned by deploy action."
+            exit 1
+          fi
+
+          if [[ "${ENV_URL}" == http://* || "${ENV_URL}" == https://* ]]; then
+            URLS=("${ENV_URL%/}/health")
+          else
+            URLS=("https://${ENV_URL%/}/health" "http://${ENV_URL%/}/health")
+          fi
+
+          for url in "${URLS[@]}"; do
+            echo "Probing ${url}"
+            if curl --fail --show-error --silent --max-time 15 \
+              --retry 8 --retry-delay 5 --retry-all-errors "${url}"; then
+              exit 0
+            fi
+          done
+
+          echo "Deployed app health endpoint did not return 2xx."
+          exit 1
