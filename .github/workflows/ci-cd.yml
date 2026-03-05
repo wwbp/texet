@@ -87,65 +87,57 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Deploy to Elastic Beanstalk
+        id: eb_deploy
         uses: aws-actions/aws-elasticbeanstalk-deploy@v1.0.0
         with:
           aws-region: ${{ env.AWS_REGION }}
           application-name: ${{ secrets.AWS_BACKEND_APPLICATION_NAME }}
           environment-name: ${{ secrets.AWS_PROD_BACKEND_ENVIRONMENT_NAME }}
           version-label: ${{ github.sha }}
+          wait-for-deployment: true
+          wait-for-environment-recovery: true
           exclude-patterns: docker-compose.yml
           create-application-if-not-exists: false
           create-environment-if-not-exists: false
 
-      - name: Verify deployment reached target version and healthy state
+      - name: Assert EB deployment state
         env:
-          APP_NAME: ${{ secrets.AWS_BACKEND_APPLICATION_NAME }}
-          ENV_NAME: ${{ secrets.AWS_PROD_BACKEND_ENVIRONMENT_NAME }}
+          DEPLOYED_VERSION: ${{ steps.eb_deploy.outputs['version-label'] }}
+          DEPLOYED_STATUS: ${{ steps.eb_deploy.outputs['environment-status'] }}
+          DEPLOYED_HEALTH: ${{ steps.eb_deploy.outputs['environment-health'] }}
           TARGET_VERSION: ${{ github.sha }}
         run: |
           set -euo pipefail
 
-          echo "Waiting for Elastic Beanstalk update to complete for environment: ${ENV_NAME}"
-          aws elasticbeanstalk wait environment-updated \
-            --region "${AWS_REGION}" \
-            --environment-names "${ENV_NAME}"
+          echo "Deployed version=${DEPLOYED_VERSION}, status=${DEPLOYED_STATUS}, health=${DEPLOYED_HEALTH}"
+          test "${DEPLOYED_VERSION}" = "${TARGET_VERSION}"
+          test "${DEPLOYED_STATUS}" = "Ready"
+          test "${DEPLOYED_HEALTH}" = "Green"
 
-          # Fetch live deployment state and enforce correctness.
-          ENV_STATE="$(aws elasticbeanstalk describe-environments \
-            --region "${AWS_REGION}" \
-            --application-name "${APP_NAME}" \
-            --environment-names "${ENV_NAME}" \
-            --query 'Environments[0].[VersionLabel,Status,Health,HealthStatus]' \
-            --output text)"
+      - name: Smoke test deployed /health endpoint
+        env:
+          ENV_URL: ${{ steps.eb_deploy.outputs['environment-url'] }}
+        run: |
+          set -euo pipefail
 
-          ACTUAL_VERSION="$(echo "${ENV_STATE}" | awk '{print $1}')"
-          STATUS="$(echo "${ENV_STATE}" | awk '{print $2}')"
-          HEALTH="$(echo "${ENV_STATE}" | awk '{print $3}')"
-          HEALTH_STATUS="$(echo "${ENV_STATE}" | awk '{print $4}')"
-
-          echo "Elastic Beanstalk state:"
-          echo "  version_label=${ACTUAL_VERSION}"
-          echo "  status=${STATUS}"
-          echo "  health=${HEALTH}"
-          echo "  health_status=${HEALTH_STATUS}"
-
-          if [ "${ACTUAL_VERSION}" != "${TARGET_VERSION}" ]; then
-            echo "Deployment mismatch: expected version '${TARGET_VERSION}', got '${ACTUAL_VERSION}'"
+          if [ -z "${ENV_URL}" ] || [ "${ENV_URL}" = "None" ]; then
+            echo "No environment URL returned by deploy action."
             exit 1
           fi
 
-          if [ "${STATUS}" != "Ready" ]; then
-            echo "Environment status is not Ready: ${STATUS}"
-            exit 1
+          if [[ "${ENV_URL}" == http://* || "${ENV_URL}" == https://* ]]; then
+            URLS=("${ENV_URL%/}/health")
+          else
+            URLS=("https://${ENV_URL%/}/health" "http://${ENV_URL%/}/health")
           fi
 
-          if [ "${HEALTH}" = "Red" ] || [ "${HEALTH_STATUS}" = "Degraded" ] || [ "${HEALTH_STATUS}" = "Severe" ]; then
-            echo "Environment health check failed: health=${HEALTH}, health_status=${HEALTH_STATUS}"
-            echo "Recent Elastic Beanstalk events:"
-            aws elasticbeanstalk describe-events \
-              --region "${AWS_REGION}" \
-              --environment-name "${ENV_NAME}" \
-              --max-items 20 \
-              --output table || true
-            exit 1
-          fi
+          for url in "${URLS[@]}"; do
+            echo "Probing ${url}"
+            if curl --fail --show-error --silent --max-time 15 \
+              --retry 8 --retry-delay 5 --retry-all-errors "${url}"; then
+              exit 0
+            fi
+          done
+
+          echo "Deployed app health endpoint did not return 2xx."
+          exit 1
