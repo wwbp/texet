@@ -93,5 +93,6 @@ jobs:
           application-name: ${{ secrets.AWS_BACKEND_APPLICATION_NAME }}
           environment-name: ${{ secrets.AWS_PROD_BACKEND_ENVIRONMENT_NAME }}
           version-label: ${{ github.sha }}
+          exclude-patterns: docker-compose.yml
           create-application-if-not-exists: false
           create-environment-if-not-exists: false
