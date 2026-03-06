@@ -4,8 +4,10 @@ import os
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from sqladmin.filters import OperationColumnFilter
 
 from app.console import init_console
+from app.console.admin_ui import UtteranceAdmin
 from app.db import get_engine
 
 
@@ -63,3 +65,13 @@ async def test_admin_ui_lists_with_basic_auth(admin_ui_client: AsyncClient, path
     headers = _basic_auth_header("admin", "secret")
     response = await admin_ui_client.get(path, headers=headers)
     assert response.status_code == 200
+
+
+def test_utterance_admin_has_user_filter_and_timestamp_default_sort() -> None:
+    assert UtteranceAdmin.column_default_sort == [("timestamp", True), ("id", True)]
+    assert UtteranceAdmin.column_labels["speaker_id"] == "User ID"
+    assert any(
+        isinstance(filter_config, OperationColumnFilter)
+        and getattr(filter_config, "parameter_name", None) == "speaker_id"
+        for filter_config in UtteranceAdmin.column_filters
+    )

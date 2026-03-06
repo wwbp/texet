@@ -5,7 +5,11 @@ import inspect
 from fastapi import FastAPI
 from sqladmin import Admin, ModelView
 from sqladmin.authentication import AuthenticationBackend
-from sqladmin.filters import AllUniqueStringValuesFilter, StaticValuesFilter
+from sqladmin.filters import (
+    AllUniqueStringValuesFilter,
+    OperationColumnFilter,
+    StaticValuesFilter,
+)
 from starlette.requests import Request
 
 from app.config import CONSOLE_PREFIX, UTTERANCE_STATUSES, admin_enabled, get_admin_secret_key
@@ -88,6 +92,7 @@ class UtteranceAdmin(ModelView, model=Utterance):
     can_delete = False
     can_view_details = True
     page_size = 50
+    column_default_sort = [("timestamp", True), ("id", True)]
     column_list = [
         "id",
         "conversation_id",
@@ -110,6 +115,7 @@ class UtteranceAdmin(ModelView, model=Utterance):
     ]
     column_searchable_list = ["text", "speaker_id", "conversation_id"]
     column_filters = [
+        OperationColumnFilter(Utterance.speaker_id, title="User ID"),
         StaticValuesFilter(
             Utterance.status,
             values=[(status, status) for status in UTTERANCE_STATUSES],
@@ -119,7 +125,7 @@ class UtteranceAdmin(ModelView, model=Utterance):
     column_labels = {
         "id": "Utterance ID",
         "conversation_id": "Conversation ID",
-        "speaker_id": "Speaker ID",
+        "speaker_id": "User ID",
         "reply_to_id": "Reply To",
         "timestamp": "Timestamp",
         "created_at": "Created At",
