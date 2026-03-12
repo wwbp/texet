@@ -176,9 +176,7 @@ async def test_get_or_create_system_prompt_uses_latest_created(
     prompt = await get_or_create_system_prompt(async_session)
     assert prompt == "second"
 
-    async_session.add(
-        SystemPrompt(prompt="third", created_at=base + datetime.timedelta(seconds=2))
-    )
+    async_session.add(SystemPrompt(prompt="third", created_at=base + datetime.timedelta(seconds=2)))
     await async_session.commit()
 
     latest = await get_or_create_system_prompt(async_session)

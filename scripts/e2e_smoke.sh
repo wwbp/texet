@@ -154,3 +154,6 @@ else
   fi
   echo "E2E OK: ${expected_messages} requests, ${expected_utterances} utterances, all sent."
 fi
+
+echo "Running moderation smoke..."
+docker compose run --rm --build -T api env PYTHONPATH=/app uv run python scripts/moderation_smoke.py

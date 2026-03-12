@@ -4,6 +4,7 @@ import httpx
 from fastapi import BackgroundTasks
 from kani import ChatMessage, Kani  # type: ignore[import-untyped]
 from kani.engines.openai import OpenAIEngine  # type: ignore[import-untyped]
+from openai import OpenAI
 from sqlalchemy.ext.asyncio import (
     AsyncConnection,
     AsyncEngine,
@@ -12,6 +13,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from app.config import (
+    MODERATION_VALUES_FOR_BLOCKED,
     UTTERANCE_STATUS_FAILED,
     UTTERANCE_STATUS_QUEUED,
     UTTERANCE_STATUS_RECEIVED,
@@ -83,6 +85,38 @@ async def _send_sms(user_id: str, message: str, utterance_id: str) -> None:
         response.raise_for_status()
 
 
+async def _moderate_message(utterance: Utterance) -> tuple[bool, str]:
+    api_key = get_openai_api_key()
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY is not set.")
+    if utterance.text is None:
+        raise RuntimeError("Utterance text is not set.")
+    text = utterance.text
+
+    client = OpenAI(api_key=api_key)
+    moderation_response = client.moderations.create(
+        input=text,
+        model="omni-moderation-latest",
+    )
+
+    # OpenAI may return category scores as a typed object; normalize to a plain dict.
+    raw_category_scores = moderation_response.results[0].category_scores
+    if raw_category_scores is None:
+        return False, ""
+    category_scores = (
+        raw_category_scores.model_dump()
+        if hasattr(raw_category_scores, "model_dump")
+        else cast(dict[str, float], raw_category_scores)
+    )
+
+    # moderation score represents tolerance
+    for category, score in category_scores.items():
+        if score > MODERATION_VALUES_FOR_BLOCKED.get(category, 1.0):
+            blocked_status = f"Blocked due to {category} content with score {score:.2f}."
+            return True, blocked_status.strip()
+    return False, ""
+
+
 async def _run_deferred_reply(
     user_id: str,
     user_utterance_id: str,
@@ -94,6 +128,10 @@ async def _run_deferred_reply(
             user_utterance = await session.get(Utterance, user_utterance_id)
             if not user_utterance or user_utterance.text is None:
                 raise RuntimeError("User utterance text missing.")
+
+            # moderate user message
+            # if moderated send UTTERANCE_STATUS_MODERATED and return
+            # else continue to generate bot response
 
             chat_history = await build_chat_history(
                 session,

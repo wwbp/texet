@@ -120,7 +120,7 @@ class UtteranceAdmin(ModelView, model=Utterance):
             Utterance.status,
             values=[(status, status) for status in UTTERANCE_STATUSES],
             title="Status",
-        )
+        ),
     ]
     column_labels = {
         "id": "Utterance ID",

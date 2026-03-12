@@ -59,9 +59,7 @@ def sms_outbox(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, str]]:
     outbox: list[dict[str, str]] = []
 
     async def _fake_send_sms(user_id: str, message: str, utterance_id: str) -> None:
-        outbox.append(
-            {"user_id": user_id, "message": message, "utterance_id": utterance_id}
-        )
+        outbox.append({"user_id": user_id, "message": message, "utterance_id": utterance_id})
 
     monkeypatch.setattr(response_service, "_send_sms", _fake_send_sms)
     return outbox
@@ -143,9 +141,7 @@ async def test_response_allows_empty_input(
     )
     assert response.status_code == 202
     body = response.json()
-    assert sms_outbox == [
-        {"user_id": "u-empty", "message": "reply:", "utterance_id": body["id"]}
-    ]
+    assert sms_outbox == [{"user_id": "u-empty", "message": "reply:", "utterance_id": body["id"]}]
 
 
 @pytest.mark.asyncio
