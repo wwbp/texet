@@ -55,12 +55,13 @@ async def _run_smoke() -> int:
     failures: list[str] = []
     for index, case in enumerate(CASES, start=1):
         utterance = _build_utterance(case, index)
-        blocked, reason = await response_service._moderate_message(utterance)
-        self_harm_detected = blocked and "self-harm" in reason
+        blocked, reason, category, score = await response_service._moderate_message(utterance)
+        self_harm_detected = blocked and category.startswith("self-harm")
 
         print(
             f"{index}. {case.label}: blocked={blocked}, "
-            f"self_harm_detected={self_harm_detected}, reason={reason or '<none>'}"
+            f"self_harm_detected={self_harm_detected}, "
+            f"category={category or '<none>'}, score={score:.4f}, reason={reason or '<none>'}"
         )
 
         if case.expect_self_harm is None:

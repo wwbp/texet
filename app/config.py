@@ -25,6 +25,63 @@ def get_sms_timeout_seconds() -> float:
     return parsed if parsed >= 0.1 else 15.0
 
 
+def get_mail_username() -> str:
+    return os.getenv("MAIL_USERNAME", "")
+
+
+def get_mail_password() -> str:
+    return os.getenv("MAIL_PASSWORD", "")
+
+
+def get_mail_from() -> str:
+    return os.getenv("MAIL_FROM", "")
+
+
+def get_mail_port() -> int:
+    value = os.getenv("MAIL_PORT")
+    if not value:
+        return 465
+    try:
+        parsed = int(value)
+    except ValueError:
+        return 465
+    return parsed if parsed > 0 else 465
+
+
+def get_mail_server() -> str:
+    return os.getenv("MAIL_SERVER", "")
+
+
+def get_mail_starttls() -> bool:
+    return os.getenv("MAIL_STARTTLS", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def get_mail_ssl_tls() -> bool:
+    value = os.getenv("MAIL_SSL_TLS")
+    if value is None:
+        return True
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def get_mail_use_credentials() -> bool:
+    value = os.getenv("MAIL_USE_CREDENTIALS")
+    if value is None:
+        return True
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def get_mail_validate_certs() -> bool:
+    value = os.getenv("MAIL_VALIDATE_CERTS")
+    if value is None:
+        return True
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def get_moderation_alert_emails() -> list[str]:
+    raw = os.getenv("MODERATION_ALERT_EMAILS", "")
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
 # OPENAI_API_KEY: API key for OpenAI.
 def get_openai_api_key() -> str:
     return os.getenv("OPENAI_API_KEY", "")

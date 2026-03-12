@@ -92,10 +92,35 @@ def kani_stub(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
 
 @pytest.fixture(autouse=True)
 def moderation_stub(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def _allow_moderation(_utterance: object) -> tuple[bool, str]:
-        return False, ""
+    async def _allow_moderation(_utterance: object) -> tuple[bool, str, str, float]:
+        return False, "", "", 0.0
 
     monkeypatch.setattr(response_service, "_moderate_message", _allow_moderation)
+
+
+@pytest.fixture()
+def moderation_email_outbox(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
+    outbox: list[dict[str, object]] = []
+
+    async def _fake_send_moderation_email(
+        user_id: str,
+        utterance_id: str,
+        blocked_category: str,
+        blocked_score: float,
+        recent_chat_history: list[object],
+    ) -> None:
+        outbox.append(
+            {
+                "user_id": user_id,
+                "utterance_id": utterance_id,
+                "blocked_category": blocked_category,
+                "blocked_score": blocked_score,
+                "recent_chat_history": recent_chat_history,
+            }
+        )
+
+    monkeypatch.setattr(response_service, "_send_moderation_email", _fake_send_moderation_email)
+    return outbox
 
 
 @pytest.mark.asyncio
@@ -378,6 +403,102 @@ async def test_response_multiple_users_interleaved(
             assert utterance.error is None
         else:
             assert utterance.status == UTTERANCE_STATUS_RECEIVED
+
+
+@pytest.mark.asyncio
+async def test_response_sends_moderation_email_when_blocked(
+    async_client: AsyncClient,
+    async_session: AsyncSession,
+    sms_outbox: list[dict[str, str]],
+    moderation_email_outbox: list[dict[str, object]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _block_moderation(_utterance: object) -> tuple[bool, str, str, float]:
+        return True, "Blocked due to violence content with score 0.91.", "violence", 0.91
+
+    monkeypatch.setattr(response_service, "_moderate_message", _block_moderation)
+
+    response = await async_client.post(
+        "/response",
+        headers={"Authorization": f"Bearer {API_KEY}"},
+        json={"user_id": "u-mod", "input": "blocked message"},
+    )
+    assert response.status_code == 202
+    body = response.json()
+
+    assert sms_outbox == [
+        {
+            "user_id": "u-mod",
+            "message": "Blocked due to violence content with score 0.91.",
+            "utterance_id": body["id"],
+        }
+    ]
+
+    assert len(moderation_email_outbox) == 1
+    email = moderation_email_outbox[0]
+    assert email["user_id"] == "u-mod"
+    assert email["blocked_category"] == "violence"
+    assert email["blocked_score"] == pytest.approx(0.91)
+
+    async_session.expire_all()
+    user_result = await async_session.execute(
+        select(Utterance).where(Utterance.speaker_id == "u-mod")
+    )
+    user_utterance = user_result.scalar_one()
+    assert email["utterance_id"] == user_utterance.id
+
+    recent_history = email["recent_chat_history"]
+    assert isinstance(recent_history, list)
+    assert 1 <= len(recent_history) <= 5
+    last_message = recent_history[-1]
+    assert last_message.content == "blocked message"  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+async def test_response_does_not_fail_if_moderation_email_errors(
+    async_client: AsyncClient,
+    async_session: AsyncSession,
+    sms_outbox: list[dict[str, str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _block_moderation(_utterance: object) -> tuple[bool, str, str, float]:
+        return True, "Blocked due to harassment content with score 0.73.", "harassment", 0.73
+
+    async def _fail_send_moderation_email(
+        user_id: str,
+        utterance_id: str,
+        blocked_category: str,
+        blocked_score: float,
+        recent_chat_history: list[object],
+    ) -> None:
+        raise RuntimeError("mail down")
+
+    monkeypatch.setattr(response_service, "_moderate_message", _block_moderation)
+    monkeypatch.setattr(response_service, "_send_moderation_email", _fail_send_moderation_email)
+
+    response = await async_client.post(
+        "/response",
+        headers={"Authorization": f"Bearer {API_KEY}"},
+        json={"user_id": "u-mod-mail-fail", "input": "blocked message"},
+    )
+    assert response.status_code == 202
+    body = response.json()
+
+    assert sms_outbox == [
+        {
+            "user_id": "u-mod-mail-fail",
+            "message": "Blocked due to harassment content with score 0.73.",
+            "utterance_id": body["id"],
+        }
+    ]
+
+    async_session.expire_all()
+    bot_result = await async_session.execute(
+        select(Utterance).where(Utterance.id == body["id"])
+    )
+    bot_utterance = bot_result.scalar_one()
+    assert bot_utterance.status == UTTERANCE_STATUS_SENT
+    assert bot_utterance.error is None
 
 
 @pytest.mark.asyncio
