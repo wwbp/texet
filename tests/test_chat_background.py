@@ -51,8 +51,8 @@ def _stub_moderation_openai(
 async def test_run_deferred_reply_success(
     async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def _allow_moderation(_utterance: Utterance) -> tuple[bool, str]:
-        return False, ""
+    async def _allow_moderation(_utterance: Utterance) -> tuple[bool, str, str, float]:
+        return False, "", "", 0.0
 
     async def _fake_generate_reply(*_args: object, **_kwargs: object) -> str:
         return "ok"
@@ -113,8 +113,8 @@ async def test_run_deferred_reply_moderated_persists_and_sends(
 ) -> None:
     blocked_reason = "Blocked due to hate content with score 0.89."
 
-    async def _fake_moderate_message(_utterance: Utterance) -> tuple[bool, str]:
-        return True, blocked_reason
+    async def _fake_moderate_message(_utterance: Utterance) -> tuple[bool, str, str, float]:
+        return True, blocked_reason, "hate", 0.89
 
     async def _fail_generate_reply(*_args: object, **_kwargs: object) -> str:
         raise AssertionError("generate reply should not run for moderated messages")
@@ -173,8 +173,8 @@ async def test_run_deferred_reply_moderated_persists_and_sends(
 async def test_run_deferred_reply_failure_marks_failed(
     async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def _allow_moderation(_utterance: Utterance) -> tuple[bool, str]:
-        return False, ""
+    async def _allow_moderation(_utterance: Utterance) -> tuple[bool, str, str, float]:
+        return False, "", "", 0.0
 
     async def _fake_generate_reply(*_args: object, **_kwargs: object) -> str:
         raise RuntimeError("boom")
@@ -279,10 +279,12 @@ async def test_moderate_message_allows_when_scores_missing(
     captured = _stub_moderation_openai(monkeypatch, None)
     utterance = Utterance(conversation_id="c-mod-1", speaker_id="u-mod-1", text="sample input")
 
-    blocked, reason = await response_service._moderate_message(utterance)
+    blocked, reason, category, score = await response_service._moderate_message(utterance)
 
     assert blocked is False
     assert reason == ""
+    assert category == ""
+    assert score == 0.0
     assert captured == {
         "api_key": "test-openai-key",
         "input": "sample input",
@@ -298,11 +300,12 @@ async def test_moderate_message_blocks_when_score_exceeds_threshold(
     _stub_moderation_openai(monkeypatch, {"harassment": threshold + 0.01})
     utterance = Utterance(conversation_id="c-mod-2", speaker_id="u-mod-2", text="sample input")
 
-    blocked, reason = await response_service._moderate_message(utterance)
+    blocked, reason, category, score = await response_service._moderate_message(utterance)
 
     assert blocked is True
     assert "harassment" in reason
-    assert f"{threshold + 0.01}" in reason
+    assert category == "harassment"
+    assert score == pytest.approx(threshold + 0.01)
 
 
 @pytest.mark.asyncio
@@ -313,10 +316,12 @@ async def test_moderate_message_allows_when_score_equals_threshold(
     _stub_moderation_openai(monkeypatch, {"hate": threshold})
     utterance = Utterance(conversation_id="c-mod-3", speaker_id="u-mod-3", text="sample input")
 
-    blocked, reason = await response_service._moderate_message(utterance)
+    blocked, reason, category, score = await response_service._moderate_message(utterance)
 
     assert blocked is False
     assert reason == ""
+    assert category == ""
+    assert score == 0.0
 
 
 @pytest.mark.asyncio
@@ -326,10 +331,12 @@ async def test_moderate_message_allows_unknown_category_below_default_threshold(
     _stub_moderation_openai(monkeypatch, {"unknown/category": 0.99})
     utterance = Utterance(conversation_id="c-mod-4", speaker_id="u-mod-4", text="sample input")
 
-    blocked, reason = await response_service._moderate_message(utterance)
+    blocked, reason, category, score = await response_service._moderate_message(utterance)
 
     assert blocked is False
     assert reason == ""
+    assert category == ""
+    assert score == 0.0
 
 
 @pytest.mark.asyncio
