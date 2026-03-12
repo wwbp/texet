@@ -1,4 +1,4 @@
-.PHONY: help start down reset check test qa-required migration migrate smoke api-key lint fix type audit
+.PHONY: help start down reset check test qa-required migration migrate smoke smoke-moderation api-key lint fix type audit
 
 help:
 	@awk 'BEGIN{FS=":.*##"} /^[a-zA-Z_-]+:.*##/{printf "%-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -44,6 +44,9 @@ migrate: check ## Apply migrations
 
 smoke: check ## Run end-to-end smoke test
 	bash scripts/e2e_smoke.sh
+
+smoke-moderation: ## Run live moderation smoke test (requires OPENAI_API_KEY)
+	docker compose run --rm --build api env PYTHONPATH=/app uv run python scripts/moderation_smoke.py
 
 api-key: check ## Create an API key
 	docker compose run --rm --build api uv run python -m app.auth.cli
