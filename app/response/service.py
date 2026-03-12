@@ -117,6 +117,26 @@ async def _moderate_message(utterance: Utterance) -> tuple[bool, str]:
     return False, ""
 
 
+async def _persist_and_send_bot_reply(
+    session: AsyncSession,
+    user_id: str,
+    bot_utterance_id: str,
+    reply_text: str,
+) -> None:
+    bot_utterance = await session.get(Utterance, bot_utterance_id)
+    if not bot_utterance:
+        raise RuntimeError(f"Utterance not found: {bot_utterance_id}")
+
+    bot_utterance.text = reply_text
+    bot_utterance.error = None
+    await session.commit()
+
+    await _send_sms(user_id, reply_text, bot_utterance_id)
+
+    bot_utterance.status = UTTERANCE_STATUS_SENT
+    await session.commit()
+
+
 async def _run_deferred_reply(
     user_id: str,
     user_utterance_id: str,
@@ -129,32 +149,27 @@ async def _run_deferred_reply(
             if not user_utterance or user_utterance.text is None:
                 raise RuntimeError("User utterance text missing.")
 
-            # moderate user message
-            # if moderated send UTTERANCE_STATUS_MODERATED and return
-            # else continue to generate bot response
+            blocked, reason = await _moderate_message(user_utterance)
+            if blocked:
+                reply_text = reason
+            else:
+                chat_history = await build_chat_history(
+                    session,
+                    conversation_id=user_utterance.conversation_id,
+                    user_id=user_id,
+                    up_to_timestamp=user_utterance.timestamp,
+                    exclude_utterance_id=user_utterance.id,
+                )
 
-            chat_history = await build_chat_history(
-                session,
-                conversation_id=user_utterance.conversation_id,
+                system_prompt = await get_or_create_system_prompt(session)
+                reply_text = await _generate_reply(chat_history, user_utterance.text, system_prompt)
+
+            await _persist_and_send_bot_reply(
+                session=session,
                 user_id=user_id,
-                up_to_timestamp=user_utterance.timestamp,
-                exclude_utterance_id=user_utterance.id,
+                bot_utterance_id=bot_utterance_id,
+                reply_text=reply_text,
             )
-
-            system_prompt = await get_or_create_system_prompt(session)
-            reply_text = await _generate_reply(chat_history, user_utterance.text, system_prompt)
-
-            bot_utterance = await session.get(Utterance, bot_utterance_id)
-            if not bot_utterance:
-                raise RuntimeError(f"Utterance not found: {bot_utterance_id}")
-            bot_utterance.text = reply_text
-            bot_utterance.error = None
-            await session.commit()
-
-            await _send_sms(user_id, reply_text, bot_utterance_id)
-
-            bot_utterance.status = UTTERANCE_STATUS_SENT
-            await session.commit()
         except Exception as exc:
             await session.rollback()
             failed_utterance = await session.get(Utterance, bot_utterance_id)

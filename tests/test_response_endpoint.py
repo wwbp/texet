@@ -90,6 +90,14 @@ def kani_stub(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
     return calls
 
 
+@pytest.fixture(autouse=True)
+def moderation_stub(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _allow_moderation(_utterance: object) -> tuple[bool, str]:
+        return False, ""
+
+    monkeypatch.setattr(response_service, "_moderate_message", _allow_moderation)
+
+
 @pytest.mark.asyncio
 async def test_response_requires_auth(async_client: AsyncClient) -> None:
     response = await async_client.post(
