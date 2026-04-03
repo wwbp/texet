@@ -5,10 +5,16 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker
 
-from app.config import MODERATION_VALUES_FOR_BLOCKED, UTTERANCE_STATUS_FAILED, UTTERANCE_STATUS_SENT
+from app.config import (
+    MODERATION_VALUES_FOR_BLOCKED,
+    UTTERANCE_STATUS_FAILED,
+    UTTERANCE_STATUS_MODERATED,
+    UTTERANCE_STATUS_SENT,
+)
 from app.models.response import Utterance
 from app.response import service as response_service
 from app.response.crud import (
+    DEFAULT_SYSTEM_PROMPT,
     create_queued_utterance,
     create_utterance,
     get_or_create_bot_speaker,
@@ -37,13 +43,16 @@ def _stub_moderation_openai(
             captured["api_key"] = api_key
             self.moderations = SimpleNamespace(create=self._create)
 
-        def _create(self, *, input: str, model: str) -> SimpleNamespace:
+        async def _create(self, *, input: str, model: str) -> SimpleNamespace:
             captured["input"] = input
             captured["model"] = model
             return response
 
+        async def close(self) -> None:
+            captured["closed"] = True
+
     monkeypatch.setattr(response_service, "get_openai_api_key", lambda: "test-openai-key")
-    monkeypatch.setattr(response_service, "OpenAI", _FakeOpenAI)
+    monkeypatch.setattr(response_service, "AsyncOpenAI", _FakeOpenAI)
     return captured
 
 
@@ -52,6 +61,9 @@ async def test_run_deferred_reply_success(
     async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async def _allow_moderation(_utterance: Utterance) -> tuple[bool, str, str, float]:
+        return False, "", "", 0.0
+
+    async def _allow_text_moderation(_text: str) -> tuple[bool, str, str, float]:
         return False, "", "", 0.0
 
     async def _fake_generate_reply(*_args: object, **_kwargs: object) -> str:
@@ -65,6 +77,7 @@ async def test_run_deferred_reply_success(
         sent["utterance_id"] = utterance_id
 
     monkeypatch.setattr(response_service, "_moderate_message", _allow_moderation)
+    monkeypatch.setattr(response_service, "_moderate_text", _allow_text_moderation)
     monkeypatch.setattr(response_service, "_generate_reply", _fake_generate_reply)
     monkeypatch.setattr(response_service, "_send_sms", _fake_send_sms)
 
@@ -111,10 +124,13 @@ async def test_run_deferred_reply_success(
 async def test_run_deferred_reply_moderated_persists_and_sends(
     async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    blocked_reason = "Blocked due to hate content with score 0.89."
+    blocked_reason = "Your message was moderated due to hate content with score 0.89."
 
     async def _fake_moderate_message(_utterance: Utterance) -> tuple[bool, str, str, float]:
         return True, blocked_reason, "hate", 0.89
+
+    async def _allow_text_moderation(_text: str) -> tuple[bool, str, str, float]:
+        return False, "", "", 0.0
 
     async def _fail_generate_reply(*_args: object, **_kwargs: object) -> str:
         raise AssertionError("generate reply should not run for moderated messages")
@@ -127,6 +143,7 @@ async def test_run_deferred_reply_moderated_persists_and_sends(
         sent["utterance_id"] = utterance_id
 
     monkeypatch.setattr(response_service, "_moderate_message", _fake_moderate_message)
+    monkeypatch.setattr(response_service, "_moderate_text", _allow_text_moderation)
     monkeypatch.setattr(response_service, "_generate_reply", _fail_generate_reply)
     monkeypatch.setattr(response_service, "_send_sms", _fake_send_sms)
 
@@ -146,6 +163,7 @@ async def test_run_deferred_reply_moderated_persists_and_sends(
             bot.id,
             reply_to_id=user_utterance.id,
         )
+        user_utterance_id = user_utterance.id
         bot_utterance_id = bot_utterance.id
 
     sessionmaker = _sessionmaker_from(async_session)
@@ -159,9 +177,12 @@ async def test_run_deferred_reply_moderated_persists_and_sends(
     async_session.expire_all()
     refreshed = await async_session.get(Utterance, bot_utterance_id)
     assert refreshed is not None
-    assert refreshed.status == UTTERANCE_STATUS_SENT
+    assert refreshed.status == UTTERANCE_STATUS_MODERATED
     assert refreshed.text == blocked_reason
     assert refreshed.error is None
+    refreshed_user = await async_session.get(Utterance, user_utterance_id)
+    assert refreshed_user is not None
+    assert refreshed_user.status == UTTERANCE_STATUS_MODERATED
     assert sent == {
         "user_id": "u-bg-mod",
         "message": blocked_reason,
@@ -176,10 +197,14 @@ async def test_run_deferred_reply_failure_marks_failed(
     async def _allow_moderation(_utterance: Utterance) -> tuple[bool, str, str, float]:
         return False, "", "", 0.0
 
+    async def _allow_text_moderation(_text: str) -> tuple[bool, str, str, float]:
+        return False, "", "", 0.0
+
     async def _fake_generate_reply(*_args: object, **_kwargs: object) -> str:
         raise RuntimeError("boom")
 
     monkeypatch.setattr(response_service, "_moderate_message", _allow_moderation)
+    monkeypatch.setattr(response_service, "_moderate_text", _allow_text_moderation)
     monkeypatch.setattr(response_service, "_generate_reply", _fake_generate_reply)
 
     async with async_session.begin():
@@ -213,6 +238,141 @@ async def test_run_deferred_reply_failure_marks_failed(
     assert refreshed is not None
     assert refreshed.status == UTTERANCE_STATUS_FAILED
     assert refreshed.error and "boom" in refreshed.error
+
+
+@pytest.mark.asyncio
+async def test_run_deferred_reply_moderates_generated_reply_and_sends_notice(
+    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    raw_reply = "unsafe generated reply"
+    moderation_notice = "A generated reply was moderated due to violence content with score 0.91."
+
+    async def _allow_moderation(_utterance: Utterance) -> tuple[bool, str, str, float]:
+        return False, "", "", 0.0
+
+    async def _fake_generate_reply(*_args: object, **_kwargs: object) -> str:
+        return raw_reply
+
+    async def _block_generated_reply(text: str) -> tuple[bool, str, str, float]:
+        assert text == raw_reply
+        return True, "Blocked due to violence content with score 0.91.", "violence", 0.91
+
+    sent: dict[str, str] = {}
+
+    async def _fake_send_sms(user_id: str, message: str, utterance_id: str) -> None:
+        sent["user_id"] = user_id
+        sent["message"] = message
+        sent["utterance_id"] = utterance_id
+
+    monkeypatch.setattr(response_service, "_moderate_message", _allow_moderation)
+    monkeypatch.setattr(response_service, "_generate_reply", _fake_generate_reply)
+    monkeypatch.setattr(response_service, "_moderate_text", _block_generated_reply)
+    monkeypatch.setattr(response_service, "_send_sms", _fake_send_sms)
+
+    async with async_session.begin():
+        speaker = await get_or_create_speaker(async_session, "u-bg-outbound-mod", meta={"type": "user"})
+        bot = await get_or_create_bot_speaker(async_session, "u-bg-outbound-mod")
+        conversation = await get_or_create_conversation(async_session, speaker.id)
+        user_utterance = await create_utterance(
+            async_session,
+            conversation.id,
+            speaker.id,
+            "hi",
+        )
+        bot_utterance = await create_queued_utterance(
+            async_session,
+            conversation.id,
+            bot.id,
+            reply_to_id=user_utterance.id,
+        )
+        bot_utterance_id = bot_utterance.id
+
+    sessionmaker = _sessionmaker_from(async_session)
+    await response_service._run_deferred_reply(
+        "u-bg-outbound-mod",
+        user_utterance.id,
+        bot_utterance_id,
+        sessionmaker,
+    )
+
+    async_session.expire_all()
+    refreshed = await async_session.get(Utterance, bot_utterance_id)
+    assert refreshed is not None
+    assert refreshed.status == UTTERANCE_STATUS_MODERATED
+    assert refreshed.text == raw_reply
+    assert refreshed.meta == {
+        "texet_moderation_source": "bot",
+        "texet_moderation_category": "violence",
+        "texet_moderation_score": 0.91,
+        "texet_moderation_notice": moderation_notice,
+    }
+    assert sent == {
+        "user_id": "u-bg-outbound-mod",
+        "message": moderation_notice,
+        "utterance_id": bot_utterance_id,
+    }
+
+
+@pytest.mark.asyncio
+async def test_drain_user_queue_processes_same_user_in_sequence(
+    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    async def _allow_moderation(_utterance: Utterance) -> tuple[bool, str, str, float]:
+        return False, "", "", 0.0
+
+    async def _allow_text_moderation(_text: str) -> tuple[bool, str, str, float]:
+        return False, "", "", 0.0
+
+    async def _fake_generate_reply(
+        chat_history: list[object], query: str, system_prompt: str
+    ) -> str:
+        history = [
+            (msg.role.value, msg.content)  # type: ignore[attr-defined]
+            for msg in chat_history
+        ]
+        calls.append({"query": query, "history": history, "system_prompt": system_prompt})
+        return f"reply:{query}"
+
+    async def _fake_send_sms(user_id: str, message: str, utterance_id: str) -> None:
+        return None
+
+    monkeypatch.setattr(response_service, "_moderate_message", _allow_moderation)
+    monkeypatch.setattr(response_service, "_moderate_text", _allow_text_moderation)
+    monkeypatch.setattr(response_service, "_generate_reply", _fake_generate_reply)
+    monkeypatch.setattr(response_service, "_send_sms", _fake_send_sms)
+
+    async with async_session.begin():
+        speaker = await get_or_create_speaker(async_session, "u-bg-queue", meta={"type": "user"})
+        bot = await get_or_create_bot_speaker(async_session, "u-bg-queue")
+        conversation = await get_or_create_conversation(async_session, speaker.id)
+        first_user = await create_utterance(async_session, conversation.id, speaker.id, "one")
+        await create_queued_utterance(
+            async_session,
+            conversation.id,
+            bot.id,
+            reply_to_id=first_user.id,
+        )
+        second_user = await create_utterance(async_session, conversation.id, speaker.id, "two")
+        await create_queued_utterance(
+            async_session,
+            conversation.id,
+            bot.id,
+            reply_to_id=second_user.id,
+        )
+
+    sessionmaker = _sessionmaker_from(async_session)
+    await response_service._drain_user_queue("u-bg-queue", sessionmaker)
+
+    assert calls == [
+        {"query": "one", "history": [], "system_prompt": DEFAULT_SYSTEM_PROMPT},
+        {
+            "query": "two",
+            "history": [("user", "one"), ("assistant", "reply:one")],
+            "system_prompt": DEFAULT_SYSTEM_PROMPT,
+        },
+    ]
 
 
 @pytest.mark.asyncio
@@ -287,6 +447,7 @@ async def test_moderate_message_allows_when_scores_missing(
     assert score == 0.0
     assert captured == {
         "api_key": "test-openai-key",
+        "closed": True,
         "input": "sample input",
         "model": "omni-moderation-latest",
     }

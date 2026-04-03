@@ -10,6 +10,7 @@ from app.auth import hash_api_key
 from app.config import (
     DEFAULT_TIMEZONE,
     UTTERANCE_STATUS_FAILED,
+    UTTERANCE_STATUS_MODERATED,
     UTTERANCE_STATUS_RECEIVED,
     UTTERANCE_STATUS_SENT,
 )
@@ -96,6 +97,14 @@ def moderation_stub(monkeypatch: pytest.MonkeyPatch) -> None:
         return False, "", "", 0.0
 
     monkeypatch.setattr(response_service, "_moderate_message", _allow_moderation)
+
+
+@pytest.fixture(autouse=True)
+def outbound_moderation_stub(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _allow_text_moderation(_text: str) -> tuple[bool, str, str, float]:
+        return False, "", "", 0.0
+
+    monkeypatch.setattr(response_service, "_moderate_text", _allow_text_moderation)
 
 
 @pytest.fixture()
@@ -429,7 +438,7 @@ async def test_response_sends_moderation_email_when_blocked(
     assert sms_outbox == [
         {
             "user_id": "u-mod",
-            "message": "Blocked due to violence content with score 0.91.",
+            "message": "Your message was moderated due to violence content with score 0.91.",
             "utterance_id": body["id"],
         }
     ]
@@ -446,6 +455,7 @@ async def test_response_sends_moderation_email_when_blocked(
     )
     user_utterance = user_result.scalar_one()
     assert email["utterance_id"] == user_utterance.id
+    assert user_utterance.status == UTTERANCE_STATUS_MODERATED
 
     recent_history = email["recent_chat_history"]
     assert isinstance(recent_history, list)
@@ -487,7 +497,7 @@ async def test_response_does_not_fail_if_moderation_email_errors(
     assert sms_outbox == [
         {
             "user_id": "u-mod-mail-fail",
-            "message": "Blocked due to harassment content with score 0.73.",
+            "message": "Your message was moderated due to harassment content with score 0.73.",
             "utterance_id": body["id"],
         }
     ]
@@ -497,8 +507,61 @@ async def test_response_does_not_fail_if_moderation_email_errors(
         select(Utterance).where(Utterance.id == body["id"])
     )
     bot_utterance = bot_result.scalar_one()
-    assert bot_utterance.status == UTTERANCE_STATUS_SENT
+    assert bot_utterance.status == UTTERANCE_STATUS_MODERATED
     assert bot_utterance.error is None
+
+
+@pytest.mark.asyncio
+async def test_response_moderates_generated_reply_and_persists_raw_output(
+    async_client: AsyncClient,
+    async_session: AsyncSession,
+    sms_outbox: list[dict[str, str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_reply = "unsafe generated reply"
+    moderation_notice = "A generated reply was moderated due to violence content with score 0.91."
+
+    async def _fake_generate_reply(
+        chat_history: list[object], query: str, system_prompt: str
+    ) -> str:
+        return raw_reply
+
+    async def _block_generated_reply(text: str) -> tuple[bool, str, str, float]:
+        assert text == raw_reply
+        return True, "Blocked due to violence content with score 0.91.", "violence", 0.91
+
+    monkeypatch.setattr(response_service, "_generate_reply", _fake_generate_reply)
+    monkeypatch.setattr(response_service, "_moderate_text", _block_generated_reply)
+
+    response = await async_client.post(
+        "/response",
+        headers={"Authorization": f"Bearer {API_KEY}"},
+        json={"user_id": "u-bot-mod", "input": "hello"},
+    )
+    assert response.status_code == 202
+    body = response.json()
+
+    assert sms_outbox == [
+        {
+            "user_id": "u-bot-mod",
+            "message": moderation_notice,
+            "utterance_id": body["id"],
+        }
+    ]
+
+    async_session.expire_all()
+    bot_result = await async_session.execute(
+        select(Utterance).where(Utterance.id == body["id"])
+    )
+    bot_utterance = bot_result.scalar_one()
+    assert bot_utterance.status == UTTERANCE_STATUS_MODERATED
+    assert bot_utterance.text == raw_reply
+    assert bot_utterance.meta == {
+        "texet_moderation_source": "bot",
+        "texet_moderation_category": "violence",
+        "texet_moderation_score": 0.91,
+        "texet_moderation_notice": moderation_notice,
+    }
 
 
 @pytest.mark.asyncio

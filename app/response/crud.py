@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import (
     DEFAULT_TIMEZONE,
+    UTTERANCE_STATUS_MODERATED,
     UTTERANCE_STATUS_QUEUED,
     UTTERANCE_STATUS_RECEIVED,
     UTTERANCE_STATUSES,
@@ -148,6 +149,8 @@ async def build_chat_history(
     chat_history: list[ChatMessage] = []
     for utterance in utterances:
         if exclude_utterance_id and utterance.id == exclude_utterance_id:
+            continue
+        if utterance.status == UTTERANCE_STATUS_MODERATED:
             continue
         if not utterance.text:
             continue
