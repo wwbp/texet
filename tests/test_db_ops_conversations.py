@@ -4,7 +4,12 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import DEFAULT_TIMEZONE, UTTERANCE_STATUS_QUEUED, UTTERANCE_STATUS_RECEIVED
+from app.config import (
+    DEFAULT_TIMEZONE,
+    UTTERANCE_STATUS_MODERATED,
+    UTTERANCE_STATUS_QUEUED,
+    UTTERANCE_STATUS_RECEIVED,
+)
 from app.models.response import Conversation, SystemPrompt, Utterance
 from app.response.crud import (
     DEFAULT_SYSTEM_PROMPT,
@@ -339,3 +344,60 @@ async def test_build_chat_history_empty_on_first_message(
     )
 
     assert history == []
+
+
+@pytest.mark.asyncio
+async def test_build_chat_history_skips_moderated_utterances(
+    async_session: AsyncSession,
+) -> None:
+    speaker = await get_or_create_speaker(async_session, "user-4", meta={"type": "user"})
+    bot = await get_or_create_bot_speaker(async_session, "user-4")
+    conversation = await create_conversation(async_session, speaker.id)
+    await async_session.commit()
+
+    base = datetime.datetime(2026, 1, 3, tzinfo=DEFAULT_TIMEZONE)
+    first = await create_utterance(
+        async_session,
+        conversation.id,
+        speaker.id,
+        "safe",
+    )
+    moderated_user = await create_utterance(
+        async_session,
+        conversation.id,
+        speaker.id,
+        "blocked input",
+        status=UTTERANCE_STATUS_MODERATED,
+    )
+    moderated_bot = await create_utterance(
+        async_session,
+        conversation.id,
+        bot.id,
+        "blocked output",
+        reply_to_id=moderated_user.id,
+        status=UTTERANCE_STATUS_MODERATED,
+    )
+    final_bot = await create_utterance(
+        async_session,
+        conversation.id,
+        bot.id,
+        "safe reply",
+        reply_to_id=first.id,
+    )
+    first.timestamp = base
+    moderated_user.timestamp = base + datetime.timedelta(seconds=1)
+    moderated_bot.timestamp = base + datetime.timedelta(seconds=2)
+    final_bot.timestamp = base + datetime.timedelta(seconds=3)
+    await async_session.commit()
+
+    history = await build_chat_history(
+        async_session,
+        conversation_id=conversation.id,
+        user_id="user-4",
+        up_to_timestamp=final_bot.timestamp,
+    )
+
+    assert [(msg.role.value, msg.content) for msg in history] == [
+        ("user", "safe"),
+        ("assistant", "safe reply"),
+    ]

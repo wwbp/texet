@@ -126,12 +126,14 @@ def admin_enabled() -> bool:
 UTTERANCE_STATUS_RECEIVED: Final[Literal["received"]] = "received"
 UTTERANCE_STATUS_QUEUED: Final[Literal["queued"]] = "queued"
 UTTERANCE_STATUS_SENT: Final[Literal["sent"]] = "sent"
+UTTERANCE_STATUS_MODERATED: Final[Literal["moderated"]] = "moderated"
 UTTERANCE_STATUS_FAILED: Final[Literal["failed"]] = "failed"
 
 UTTERANCE_STATUSES = (
     UTTERANCE_STATUS_RECEIVED,
     UTTERANCE_STATUS_QUEUED,
     UTTERANCE_STATUS_SENT,
+    UTTERANCE_STATUS_MODERATED,
     UTTERANCE_STATUS_FAILED,
 )
 

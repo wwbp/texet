@@ -228,6 +228,7 @@ uses Docker Compose; use `uv` when you need to add/upgrade packages or run local
 ### LLM integration
 
 - Background task pipeline uses Kani (LLM orchestration) with OpenAI (model provider) for reply generation.
+- Per-user reply queue serialization is currently in-process, so ordered draining assumes a single API worker/replica.
 - Requires `OPENAI_API_KEY` and `OPENAI_MODEL`.
 - Failures mark the reply utterance as `failed` with an error message.
 
