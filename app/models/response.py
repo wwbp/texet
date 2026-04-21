@@ -4,7 +4,7 @@ import datetime
 import uuid
 from typing import Any
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, Text, text
+from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKey, Index, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -76,3 +76,15 @@ class SystemPrompt(Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class WeeklySummary(Base):
+    __tablename__ = "weekly_summaries"
+    __table_args__ = (
+        UniqueConstraint("user_id", "week_start", name="uq_weekly_summaries_user_week"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
+    user_id: Mapped[str] = mapped_column(String(128), ForeignKey("speakers.id"), nullable=False)
+    week_start: Mapped[datetime.date] = mapped_column(Date, nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)

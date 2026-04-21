@@ -292,7 +292,9 @@ async def test_response_reuses_existing_conversation_history(
             "hi",
             reply_to_id=user_utterance.id,
         )
-        base = datetime.datetime(2026, 1, 1, tzinfo=DEFAULT_TIMEZONE)
+        # Timestamps must be within the current week so they are not
+        # filtered out by the since_timestamp window in the pipeline.
+        base = datetime.datetime.now(DEFAULT_TIMEZONE) - datetime.timedelta(hours=2)
         user_utterance.timestamp = base
         bot_utterance.timestamp = base + datetime.timedelta(seconds=1)
 

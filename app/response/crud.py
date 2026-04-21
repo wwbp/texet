@@ -16,7 +16,7 @@ from app.config import (
     UTTERANCE_STATUS_RECEIVED,
     UTTERANCE_STATUSES,
 )
-from app.models.response import Conversation, Speaker, SystemPrompt, Utterance
+from app.models.response import Conversation, Speaker, SystemPrompt, Utterance, WeeklySummary
 
 DEFAULT_SYSTEM_PROMPT = "you are a helful assistant."
 
@@ -134,13 +134,17 @@ async def build_chat_history(
     user_id: str,
     up_to_timestamp: datetime.datetime,
     exclude_utterance_id: str | None = None,
+    since_timestamp: datetime.datetime | None = None,
 ) -> list[ChatMessage]:
+    conditions = [
+        Utterance.conversation_id == conversation_id,
+        Utterance.timestamp <= up_to_timestamp,
+    ]
+    if since_timestamp is not None:
+        conditions.append(Utterance.timestamp >= since_timestamp)
     result = await session.execute(
         select(Utterance)
-        .where(
-            Utterance.conversation_id == conversation_id,
-            Utterance.timestamp <= up_to_timestamp,
-        )
+        .where(*conditions)
         .order_by(Utterance.timestamp)
     )
     utterances = result.scalars().all()
@@ -224,3 +228,38 @@ async def create_queued_utterance(
 
     await session.flush()
     return utterance
+
+
+async def get_weekly_summary(
+    session: AsyncSession,
+    user_id: str,
+    week_start: datetime.date,
+) -> str | None:
+    result = await session.execute(
+        select(WeeklySummary).where(
+            WeeklySummary.user_id == user_id,
+            WeeklySummary.week_start == week_start,
+        )
+    )
+    row = result.scalar_one_or_none()
+    return row.summary if row else None
+
+
+async def upsert_weekly_summary(
+    session: AsyncSession,
+    user_id: str,
+    week_start: datetime.date,
+    summary: str,
+) -> None:
+    result = await session.execute(
+        select(WeeklySummary).where(
+            WeeklySummary.user_id == user_id,
+            WeeklySummary.week_start == week_start,
+        )
+    )
+    existing = result.scalar_one_or_none()
+    if existing:
+        existing.summary = summary
+    else:
+        session.add(WeeklySummary(user_id=user_id, week_start=week_start, summary=summary))
+    await session.flush()
