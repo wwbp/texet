@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 import inspect
 from contextlib import suppress
 from typing import Any, cast
@@ -50,7 +51,9 @@ from app.response.crud import (
     get_or_create_conversation,
     get_or_create_speaker,
     get_or_create_system_prompt,
+    get_weekly_summary,
 )
+from app.response.utils import week_start_utc
 from app.response.schemas import (
     ChatQueuedResponse,
     ChatRequest,
@@ -346,15 +349,27 @@ async def _process_queued_reply(
         )
         return
 
+    now_utc = datetime.datetime.now(datetime.UTC)
+    current_week_start = week_start_utc(now_utc)
+    prev_week_start = current_week_start - datetime.timedelta(days=7)
+    week_start_dt = datetime.datetime.combine(
+        current_week_start, datetime.time.min, tzinfo=datetime.UTC
+    )
+
+    prev_summary = await get_weekly_summary(session, user_id, prev_week_start)
+    system_prompt = await get_or_create_system_prompt(session)
+    if prev_summary:
+        system_prompt = f"{system_prompt}\n\n[Previous week summary]\n{prev_summary}"
+
     chat_history = await build_chat_history(
         session,
         conversation_id=user_utterance.conversation_id,
         user_id=user_id,
         up_to_timestamp=user_utterance.timestamp,
         exclude_utterance_id=user_utterance.id,
+        since_timestamp=week_start_dt,
     )
 
-    system_prompt = await get_or_create_system_prompt(session)
     reply_text = await _generate_reply(chat_history, user_utterance.text, system_prompt)
 
     reply_blocked, _, blocked_category, blocked_score = await _moderate_text(reply_text)

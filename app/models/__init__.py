@@ -1,7 +1,7 @@
 from app.models.admin import AdminExport
 from app.models.auth import ApiKey
 from app.models.base import Base
-from app.models.response import Conversation, Speaker, SystemPrompt, Utterance
+from app.models.response import Conversation, Speaker, SystemPrompt, Utterance, WeeklySummary
 
 __all__ = [
     "AdminExport",
@@ -11,4 +11,5 @@ __all__ = [
     "Speaker",
     "SystemPrompt",
     "Utterance",
+    "WeeklySummary",
 ]
