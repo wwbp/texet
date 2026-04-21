@@ -84,7 +84,7 @@ async def test_generate_user_weekly_summary_stores_result(
         speaker = await get_or_create_speaker(async_session, "u-sum-gen", meta={"type": "user"})
         bot = await get_or_create_bot_speaker(async_session, "u-sum-gen")
         conversation = await get_or_create_conversation(async_session, speaker.id)
-        await create_utterance(
+        utt1 = await create_utterance(
             async_session,
             conversation.id,
             speaker.id,
@@ -92,7 +92,8 @@ async def test_generate_user_weekly_summary_stores_result(
             meta=None,
             status="received",
         )
-        await create_utterance(
+        utt1.timestamp = _WEEK_MID_DT
+        utt2 = await create_utterance(
             async_session,
             conversation.id,
             bot.id,
@@ -100,6 +101,7 @@ async def test_generate_user_weekly_summary_stores_result(
             meta=None,
             status="sent",
         )
+        utt2.timestamp = _WEEK_MID_DT
 
     await generate_user_weekly_summary(async_session, "u-sum-gen", _WEEK_START)
 
@@ -145,20 +147,22 @@ async def test_generate_user_weekly_summary_excludes_moderated_from_transcript(
     async with async_session.begin():
         speaker = await get_or_create_speaker(async_session, "u-sum-mod", meta={"type": "user"})
         conversation = await get_or_create_conversation(async_session, speaker.id)
-        await create_utterance(
+        utt1 = await create_utterance(
             async_session,
             conversation.id,
             speaker.id,
             "bad content",
             status=UTTERANCE_STATUS_MODERATED,
         )
-        await create_utterance(
+        utt1.timestamp = _WEEK_MID_DT
+        utt2 = await create_utterance(
             async_session,
             conversation.id,
             speaker.id,
             "clean message",
             status="received",
         )
+        utt2.timestamp = _WEEK_MID_DT
 
     await generate_user_weekly_summary(async_session, "u-sum-mod", _WEEK_START)
 
@@ -181,9 +185,10 @@ async def test_generate_user_weekly_summary_is_idempotent(
     async with async_session.begin():
         speaker = await get_or_create_speaker(async_session, "u-sum-idem", meta={"type": "user"})
         conversation = await get_or_create_conversation(async_session, speaker.id)
-        await create_utterance(
+        utt = await create_utterance(
             async_session, conversation.id, speaker.id, "hi", status="received"
         )
+        utt.timestamp = _WEEK_MID_DT
 
     await generate_user_weekly_summary(async_session, "u-sum-idem", _WEEK_START)
     await generate_user_weekly_summary(async_session, "u-sum-idem", _WEEK_START)
