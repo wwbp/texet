@@ -25,6 +25,7 @@ dependencies = [
     "ruff>=0.6",
     "mypy>=1.10",
     "pip-audit>=2.7",
+    "locust>=2.20",
 ]
 
 [tool.ruff]
