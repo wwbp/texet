@@ -17,7 +17,7 @@ from app.console.core import _authorized, _credentials_valid, _now
 from app.db import get_engine
 from app.models.admin import AdminExport
 from app.models.auth import ApiKey
-from app.models.response import Conversation, Speaker, Utterance
+from app.models.response import Conversation, Speaker, Utterance, WeeklySummary
 
 
 class AdminAuth(AuthenticationBackend):
@@ -132,6 +132,26 @@ class UtteranceAdmin(ModelView, model=Utterance):
     }
 
 
+class WeeklySummaryAdmin(ModelView, model=WeeklySummary):
+    name = "Weekly Summary"
+    name_plural = "Weekly Summaries"
+    can_create = False
+    can_edit = False
+    can_delete = False
+    can_view_details = True
+    page_size = 50
+    column_default_sort = [("week_start", True)]
+    column_list = ["user_id", "week_start", "summary"]
+    column_details_list = ["id", "user_id", "week_start", "summary"]
+    column_searchable_list = ["user_id"]
+    column_labels = {
+        "id": "ID",
+        "user_id": "User ID",
+        "week_start": "Week Start",
+        "summary": "Summary",
+    }
+
+
 class ApiKeyAdmin(ModelView, model=ApiKey):
     name = "API Key"
     name_plural = "API Keys"
@@ -233,6 +253,7 @@ def init_console(app: FastAPI) -> None:
     admin.add_view(SpeakerAdmin)
     admin.add_view(ConversationAdmin)
     admin.add_view(UtteranceAdmin)
+    admin.add_view(WeeklySummaryAdmin)
     admin.add_view(ApiKeyAdmin)
     admin.add_view(AdminExportAdmin)
     app.state.admin = admin
