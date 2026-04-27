@@ -4,7 +4,18 @@ import datetime
 import uuid
 from typing import Any
 
-from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKey, Index, String, Text, UniqueConstraint, text
+from sqlalchemy import (
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -22,11 +33,20 @@ class Speaker(Base):
 class Conversation(Base):
     __tablename__ = "conversations"
     __table_args__ = (
+        # One open conversation per speaker when no day is set.
         Index(
-            "ux_conversations_owner_open",
+            "ux_conversations_owner_open_no_day",
             "owner_speaker_id",
             unique=True,
-            postgresql_where=text("status = 'open'"),
+            postgresql_where=text("status = 'open' AND day_identifier IS NULL"),
+        ),
+        # One open conversation per (speaker, day) when a day is set.
+        Index(
+            "ux_conversations_owner_open_day",
+            "owner_speaker_id",
+            "day_identifier",
+            unique=True,
+            postgresql_where=text("status = 'open' AND day_identifier IS NOT NULL"),
         ),
     )
 
@@ -34,6 +54,7 @@ class Conversation(Base):
     owner_speaker_id: Mapped[str] = mapped_column(
         String(128), ForeignKey("speakers.id"), nullable=False
     )
+    day_identifier: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="open")
     last_activity_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True),
@@ -76,6 +97,20 @@ class SystemPrompt(Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    provider: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="openai", server_default="openai"
+    )
+    model_id: Mapped[str] = mapped_column(
+        String(255), nullable=False, default="gpt-4o-mini", server_default="gpt-4o-mini"
+    )
+
+
+class DailyPrompt(Base):
+    __tablename__ = "daily_prompts"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
+    day_identifier: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
 
 
 class WeeklySummary(Base):

@@ -69,7 +69,7 @@ async def test_admin_ui_lists_with_basic_auth(admin_ui_client: AsyncClient, path
 
 def test_utterance_admin_has_user_filter_and_timestamp_default_sort() -> None:
     assert UtteranceAdmin.column_default_sort == [("timestamp", True), ("id", True)]
-    assert UtteranceAdmin.column_labels["speaker_id"] == "User ID"
+    assert UtteranceAdmin.column_labels["speaker_id"] == "User"
     assert any(
         isinstance(filter_config, OperationColumnFilter)
         and getattr(filter_config, "parameter_name", None) == "speaker_id"

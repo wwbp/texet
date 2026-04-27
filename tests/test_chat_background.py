@@ -270,7 +270,9 @@ async def test_run_deferred_reply_moderates_generated_reply_and_sends_notice(
     monkeypatch.setattr(response_service, "_send_sms", _fake_send_sms)
 
     async with async_session.begin():
-        speaker = await get_or_create_speaker(async_session, "u-bg-outbound-mod", meta={"type": "user"})
+        speaker = await get_or_create_speaker(
+            async_session, "u-bg-outbound-mod", meta={"type": "user"}
+        )
         bot = await get_or_create_bot_speaker(async_session, "u-bg-outbound-mod")
         conversation = await get_or_create_conversation(async_session, speaker.id)
         user_utterance = await create_utterance(
@@ -326,7 +328,7 @@ async def test_drain_user_queue_processes_same_user_in_sequence(
         return False, "", "", 0.0
 
     async def _fake_generate_reply(
-        chat_history: list[object], query: str, system_prompt: str
+        chat_history: list[object], query: str, system_prompt: str, **_kwargs: object
     ) -> str:
         history = [
             (msg.role.value, msg.content)  # type: ignore[attr-defined]

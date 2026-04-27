@@ -1,4 +1,4 @@
-.PHONY: help start down reset check test qa-required migration migrate smoke smoke-moderation api-key lint fix type audit
+.PHONY: help start down reset check test qa-required migration migrate smoke smoke-moderation api-key lint fix type audit load
 
 help:
 	@awk 'BEGIN{FS=":.*##"} /^[a-zA-Z_-]+:.*##/{printf "%-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -44,6 +44,9 @@ migrate: check ## Apply migrations
 
 smoke: check ## Run end-to-end smoke test
 	bash scripts/e2e_smoke.sh
+
+load: ## Run Locust load test UI (HOST=http://localhost:8000, requires TEXET_API_KEY)
+	uv run locust --host $${HOST:-http://localhost:8000}
 
 smoke-moderation: ## Run live moderation smoke test (requires OPENAI_API_KEY)
 	docker compose run --rm --build api env PYTHONPATH=/app uv run python scripts/moderation_smoke.py

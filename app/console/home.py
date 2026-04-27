@@ -87,6 +87,11 @@ async def console_root(_: None = Depends(require_admin)) -> HTMLResponse:
               <h2>System Prompts</h2>
               <p>Add, update, and delete prompts. Latest created prompt is active.</p>
             </a>
+            <a class="card" href="{CONSOLE_PREFIX}/daily-prompts">
+              <span>Assistant</span>
+              <h2>Daily Prompts</h2>
+              <p>One prompt per day number. Appended to the system prompt when matched.</p>
+            </a>
             <a class="card" href="{CONSOLE_PREFIX}/exports">
               <span>Data</span>
               <h2>Exports</h2>

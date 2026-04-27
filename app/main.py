@@ -17,9 +17,9 @@ from app.config import (
 )
 from app.console import console_router, init_console
 from app.db import get_async_session, ping_db
-from app.scheduler import start_scheduler, stop_scheduler
 from app.response import process_response
 from app.response.schemas import ResponseQueuedResponse, ResponseRequest
+from app.scheduler import start_scheduler, stop_scheduler
 
 
 @asynccontextmanager

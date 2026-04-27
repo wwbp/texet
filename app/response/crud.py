@@ -16,7 +16,7 @@ from app.config import (
     UTTERANCE_STATUS_RECEIVED,
     UTTERANCE_STATUSES,
 )
-from app.models.response import Conversation, Speaker, SystemPrompt, Utterance, WeeklySummary
+from app.models.response import Conversation, DailyPrompt, Speaker, SystemPrompt, Utterance, WeeklySummary
 
 DEFAULT_SYSTEM_PROMPT = "you are a helful assistant."
 
@@ -61,11 +61,13 @@ async def create_conversation(
     session: AsyncSession,
     owner_speaker_id: str,
     status: str = "open",
+    day_identifier: int | None = None,
     meta: dict[str, Any] | None = None,
 ) -> Conversation:
     conversation = Conversation(
         owner_speaker_id=owner_speaker_id,
         status=status,
+        day_identifier=day_identifier,
         meta=meta,
     )
     session.add(conversation)
@@ -77,12 +79,19 @@ async def get_or_create_conversation(
     session: AsyncSession,
     owner_speaker_id: str,
     status: str = "open",
+    day_identifier: int | None = None,
     meta: dict[str, Any] | None = None,
 ) -> Conversation:
+    day_filter = (
+        Conversation.day_identifier == day_identifier
+        if day_identifier is not None
+        else Conversation.day_identifier.is_(None)
+    )
     result = await session.execute(
         select(Conversation).where(
             Conversation.owner_speaker_id == owner_speaker_id,
             Conversation.status == status,
+            day_filter,
         )
     )
     conversation = result.scalar_one_or_none()
@@ -94,6 +103,7 @@ async def get_or_create_conversation(
             conversation = Conversation(
                 owner_speaker_id=owner_speaker_id,
                 status=status,
+                day_identifier=day_identifier,
                 meta=meta,
             )
             session.add(conversation)
@@ -106,12 +116,20 @@ async def get_or_create_conversation(
         select(Conversation).where(
             Conversation.owner_speaker_id == owner_speaker_id,
             Conversation.status == status,
+            day_filter,
         )
     )
     conversation = result.scalar_one_or_none()
     if not conversation:
         raise RuntimeError("Failed to create or fetch conversation.")
     return conversation
+
+
+async def get_latest_system_prompt(session: AsyncSession) -> SystemPrompt | None:
+    result = await session.execute(
+        select(SystemPrompt).order_by(SystemPrompt.created_at.desc()).limit(1)
+    )
+    return result.scalar_one_or_none()
 
 
 async def get_or_create_system_prompt(session: AsyncSession) -> str:
@@ -228,6 +246,16 @@ async def create_queued_utterance(
 
     await session.flush()
     return utterance
+
+
+async def get_daily_prompt(
+    session: AsyncSession,
+    day_identifier: int,
+) -> DailyPrompt | None:
+    result = await session.execute(
+        select(DailyPrompt).where(DailyPrompt.day_identifier == day_identifier)
+    )
+    return result.scalar_one_or_none()
 
 
 async def get_weekly_summary(

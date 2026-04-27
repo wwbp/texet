@@ -1,41 +1,23 @@
 from fastapi import Depends
 from fastapi.responses import HTMLResponse
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
 
-from app.config import BEDROCK_DEFAULT_MODEL, CONSOLE_PREFIX
+from app.config import CONSOLE_PREFIX
 from app.console.core import _escape, _serialize_datetime, console_router, require_admin
 from app.db import get_async_session
-from app.models.response import SystemPrompt
+from app.models.response import DailyPrompt
 
 _INPUT_STYLE = (
     "width:100%;padding:6px;border:1px solid var(--border);"
     "border-radius:8px;font-size:13px;"
 )
 
-_PROVIDER_OPTIONS = [
-    ("openai", "OpenAI"),
-    ("bedrock", "Amazon Bedrock"),
-]
 
-_MODEL_DEFAULTS: dict[str, str] = {
-    "openai": "gpt-4o-mini",
-    "bedrock": BEDROCK_DEFAULT_MODEL,
-}
-
-
-def _provider_select(selected: str, name: str = "provider") -> str:
-    opts = "".join(
-        f'<option value="{v}" {"selected" if v == selected else ""}>{label}</option>'
-        for v, label in _PROVIDER_OPTIONS
-    )
-    style = "padding:6px 10px;border:1px solid var(--border);border-radius:8px;"
-    return f'<select name="{name}" style="{style}">{opts}</select>'
-
-
-def _render_system_prompts_page(
-    prompts: list[SystemPrompt], error_message: str | None = None
+def _render_daily_prompts_page(
+    prompts: list[DailyPrompt], error_message: str | None = None
 ) -> HTMLResponse:
     error_block = ""
     if error_message:
@@ -45,14 +27,12 @@ def _render_system_prompts_page(
         rows = "\n".join(
             f"""
             <tr>
-              <td class="mono">{_escape(prompt.id)}</td>
+              <td class="mono">{_escape(str(prompt.day_identifier))}</td>
               <td>{_escape(_serialize_datetime(prompt.created_at))}</td>
               <td>
-                <form method="post" action="{CONSOLE_PREFIX}/system-prompts/{_escape(prompt.id)}">
-                  <textarea name="prompt" rows="3" required>{_escape(prompt.prompt)}</textarea>
-                  {_provider_select(prompt.provider)}
-                  <input name="model_id" required value="{_escape(prompt.model_id)}"
-                         style="{_INPUT_STYLE}" />
+                <form method="post"
+                      action="{CONSOLE_PREFIX}/daily-prompts/{_escape(prompt.id)}">
+                  <textarea name="content" rows="4" required>{_escape(prompt.content)}</textarea>
                   <div class="actions">
                     <button type="submit">Update</button>
                   </div>
@@ -60,7 +40,7 @@ def _render_system_prompts_page(
               </td>
               <td>
                 <form method="post"
-                      action="{CONSOLE_PREFIX}/system-prompts/{_escape(prompt.id)}/delete">
+                      action="{CONSOLE_PREFIX}/daily-prompts/{_escape(prompt.id)}/delete">
                   <button type="submit" class="danger">Delete</button>
                 </form>
               </td>
@@ -69,7 +49,7 @@ def _render_system_prompts_page(
             for prompt in prompts
         )
     else:
-        rows = '<tr><td colspan="4">No system prompts yet.</td></tr>'
+        rows = '<tr><td colspan="4">No daily prompts yet.</td></tr>'
 
     html = f"""
     <!doctype html>
@@ -77,7 +57,7 @@ def _render_system_prompts_page(
       <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>Texet Console - System Prompts</title>
+        <title>Texet Console - Daily Prompts</title>
         <style>
           :root{{
             color-scheme:light;
@@ -103,7 +83,7 @@ def _render_system_prompts_page(
           .muted{{color:var(--muted);font-size:13px}}
           .error{{margin-top:12px;color:var(--error);font-size:13px}}
           form{{margin:0}}
-          .create-form{{margin-top:12px}}
+          .create-form{{margin-top:12px;display:flex;flex-direction:column;gap:6px}}
           textarea{{
             width:100%;
             min-height:88px;
@@ -111,6 +91,13 @@ def _render_system_prompts_page(
             border:1px solid var(--border);
             border-radius:10px;
             font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
+            font-size:13px;
+          }}
+          input[type=number]{{
+            width:140px;
+            padding:6px;
+            border:1px solid var(--border);
+            border-radius:8px;
             font-size:13px;
           }}
           button{{
@@ -122,6 +109,7 @@ def _render_system_prompts_page(
             color:#fff;
             font-weight:600;
             cursor:pointer;
+            width:fit-content;
           }}
           button.danger{{border-color:#b42318;background:#b42318}}
           table{{
@@ -143,7 +131,6 @@ def _render_system_prompts_page(
           th{{font-size:12px;color:var(--muted);font-weight:600}}
           .mono{{
             font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
-            word-break:break-all;
           }}
           .actions{{display:flex;gap:8px;align-items:center}}
           a{{color:var(--accent);text-decoration:none}}
@@ -151,17 +138,20 @@ def _render_system_prompts_page(
       </head>
       <body>
         <div class="wrap">
-          <h1>System Prompts</h1>
-          <p>Prompt library for assistant system prompts.</p>
-          <p class="muted">Latest created prompt (top row) is used by the system.</p>
+          <h1>Daily Prompts</h1>
+          <p>One prompt per day number. The matching prompt is appended to the system prompt
+             when a request includes that <code>day_identifier</code> in its metadata.</p>
           {error_block}
 
           <h2>Add prompt</h2>
-          <form class="create-form" method="post" action="{CONSOLE_PREFIX}/system-prompts">
-            <textarea name="prompt" rows="4" required placeholder="System prompt"></textarea>
-            {_provider_select("openai")}
-            <input name="model_id" required value="gpt-4o-mini" placeholder="Model ID"
-                   style="{_INPUT_STYLE}margin-top:6px;" />
+          <form class="create-form" method="post" action="{CONSOLE_PREFIX}/daily-prompts">
+            <label style="font-size:13px;font-weight:600;">
+              Day number
+              <input type="number" name="day_identifier" min="1" required
+                     placeholder="e.g. 1" />
+            </label>
+            <textarea name="content" rows="4" required
+                      placeholder="Prompt content for this day"></textarea>
             <div class="actions">
               <button type="submit">Add prompt</button>
             </div>
@@ -171,9 +161,9 @@ def _render_system_prompts_page(
           <table>
             <thead>
               <tr>
-                <th>ID</th>
+                <th>Day</th>
                 <th>Created</th>
-                <th>Prompt</th>
+                <th>Content</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -192,82 +182,88 @@ def _render_system_prompts_page(
     return HTMLResponse(html.strip(), status_code=status_code)
 
 
-async def _list_prompts(session: AsyncSession) -> list[SystemPrompt]:
+async def _list_prompts(session: AsyncSession) -> list[DailyPrompt]:
     result = await session.execute(
-        select(SystemPrompt).order_by(SystemPrompt.created_at.desc()).limit(100)
+        select(DailyPrompt).order_by(DailyPrompt.day_identifier.asc())
     )
     return list(result.scalars().all())
 
 
-@console_router.get("/system-prompts", response_class=HTMLResponse)
-async def console_system_prompts(
+@console_router.get("/daily-prompts", response_class=HTMLResponse)
+async def console_daily_prompts(
     session: AsyncSession = Depends(get_async_session),
     _: None = Depends(require_admin),
 ) -> HTMLResponse:
-    return _render_system_prompts_page(await _list_prompts(session))
+    return _render_daily_prompts_page(await _list_prompts(session))
 
 
-@console_router.post("/system-prompts", response_class=HTMLResponse)
-async def console_system_prompts_create(
+@console_router.post("/daily-prompts", response_class=HTMLResponse)
+async def console_daily_prompts_create(
     request: Request,
     session: AsyncSession = Depends(get_async_session),
     _: None = Depends(require_admin),
 ) -> HTMLResponse:
     form = await request.form()
-    value = str(form.get("prompt") or "").strip()
-    provider = str(form.get("provider") or "openai").strip()
-    model_id = str(form.get("model_id") or _MODEL_DEFAULTS.get(provider, "gpt-4o-mini")).strip()
-    if not value:
-        return _render_system_prompts_page(await _list_prompts(session), "Prompt is required.")
-    if provider not in _MODEL_DEFAULTS:
-        return _render_system_prompts_page(
-            await _list_prompts(session), f"Unknown provider: {provider}"
+    content = str(form.get("content") or "").strip()
+    raw_id = str(form.get("day_identifier") or "").strip()
+
+    if not content:
+        return _render_daily_prompts_page(await _list_prompts(session), "Content is required.")
+    if not raw_id:
+        return _render_daily_prompts_page(await _list_prompts(session), "Day number is required.")
+    try:
+        day_identifier = int(raw_id)
+        if day_identifier < 1:
+            raise ValueError
+    except ValueError:
+        return _render_daily_prompts_page(
+            await _list_prompts(session), "Day number must be a positive integer."
         )
 
-    async with session.begin():
-        session.add(SystemPrompt(prompt=value, provider=provider, model_id=model_id))
-    return _render_system_prompts_page(await _list_prompts(session))
+    try:
+        async with session.begin():
+            session.add(DailyPrompt(day_identifier=day_identifier, content=content))
+    except IntegrityError:
+        return _render_daily_prompts_page(
+            await _list_prompts(session),
+            f"A prompt for day {day_identifier} already exists.",
+        )
+
+    return _render_daily_prompts_page(await _list_prompts(session))
 
 
-@console_router.post("/system-prompts/{prompt_id}", response_class=HTMLResponse)
-async def console_system_prompts_update(
+@console_router.post("/daily-prompts/{prompt_id}", response_class=HTMLResponse)
+async def console_daily_prompts_update(
     prompt_id: str,
     request: Request,
     session: AsyncSession = Depends(get_async_session),
     _: None = Depends(require_admin),
 ) -> HTMLResponse:
     form = await request.form()
-    value = str(form.get("prompt") or "").strip()
-    provider = str(form.get("provider") or "openai").strip()
-    model_id = str(form.get("model_id") or _MODEL_DEFAULTS.get(provider, "gpt-4o-mini")).strip()
-    if not value:
-        return _render_system_prompts_page(await _list_prompts(session), "Prompt is required.")
-    if provider not in _MODEL_DEFAULTS:
-        return _render_system_prompts_page(
-            await _list_prompts(session), f"Unknown provider: {provider}"
-        )
+    content = str(form.get("content") or "").strip()
+
+    if not content:
+        return _render_daily_prompts_page(await _list_prompts(session), "Content is required.")
 
     async with session.begin():
-        prompt = await session.get(SystemPrompt, prompt_id)
+        prompt = await session.get(DailyPrompt, prompt_id)
         if not prompt:
-            return _render_system_prompts_page(await _list_prompts(session), "Prompt not found.")
-        prompt.prompt = value
-        prompt.provider = provider
-        prompt.model_id = model_id
+            return _render_daily_prompts_page(await _list_prompts(session), "Prompt not found.")
+        prompt.content = content
 
-    return _render_system_prompts_page(await _list_prompts(session))
+    return _render_daily_prompts_page(await _list_prompts(session))
 
 
-@console_router.post("/system-prompts/{prompt_id}/delete", response_class=HTMLResponse)
-async def console_system_prompts_delete(
+@console_router.post("/daily-prompts/{prompt_id}/delete", response_class=HTMLResponse)
+async def console_daily_prompts_delete(
     prompt_id: str,
     session: AsyncSession = Depends(get_async_session),
     _: None = Depends(require_admin),
 ) -> HTMLResponse:
     async with session.begin():
-        prompt = await session.get(SystemPrompt, prompt_id)
+        prompt = await session.get(DailyPrompt, prompt_id)
         if not prompt:
-            return _render_system_prompts_page(await _list_prompts(session), "Prompt not found.")
+            return _render_daily_prompts_page(await _list_prompts(session), "Prompt not found.")
         await session.delete(prompt)
 
-    return _render_system_prompts_page(await _list_prompts(session))
+    return _render_daily_prompts_page(await _list_prompts(session))

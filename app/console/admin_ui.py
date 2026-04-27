@@ -20,6 +20,38 @@ from app.models.auth import ApiKey
 from app.models.response import Conversation, Speaker, Utterance
 
 
+def _fmt_dt(m: object, a: str) -> str:
+    v = getattr(m, a, None)
+    return v.strftime("%Y-%m-%d %H:%M") if v else "—"
+
+
+_META_LABELS: dict[str, str] = {
+    "texet_instruction_prompt": "Instruction Prompt",
+    "texet_day_identifier": "Day (from prompt)",
+    "texet_moderation_source": "Moderation Source",
+    "texet_moderation_category": "Moderation Category",
+    "texet_moderation_score": "Moderation Score",
+    "texet_moderation_notice": "Moderation Notice",
+}
+
+
+def _fmt_meta_detail(m: object, a: str) -> str:
+    """Render JSONB meta as labelled key: value lines. No truncation — detail view shows all."""
+    v = getattr(m, a, None)
+    if not v:
+        return "—"
+    lines = []
+    for k, val in v.items():
+        label = _META_LABELS.get(k, k)
+        lines.append(f"{label}: {val}")
+    return "\n".join(lines)
+
+
+def _fmt_day(m: object, a: str) -> str:
+    v = getattr(m, a, None)
+    return str(v) if v is not None else "—"
+
+
 class AdminAuth(AuthenticationBackend):
     async def login(self, request: Request) -> bool:
         form = await request.form()
@@ -50,11 +82,18 @@ class SpeakerAdmin(ModelView, model=Speaker):
     can_edit = False
     can_delete = False
     can_view_details = True
+    can_export = True
+    export_types = ["csv"]
     page_size = 50
+    page_size_options = [25, 50, 100]
     column_list = ["id", "created_at"]
     column_details_list = ["id", "created_at", "meta"]
     column_searchable_list = ["id"]
-    column_labels = {"id": "Speaker ID", "created_at": "Created At"}
+    column_sortable_list = [Speaker.created_at]
+    column_default_sort = (Speaker.created_at, True)
+    column_formatters = {"created_at": _fmt_dt}
+    column_formatters_detail = {"meta": _fmt_meta_detail}
+    column_labels = {"id": "Speaker ID", "created_at": "Joined"}
 
 
 class ConversationAdmin(ModelView, model=Conversation):
@@ -64,23 +103,50 @@ class ConversationAdmin(ModelView, model=Conversation):
     can_edit = False
     can_delete = False
     can_view_details = True
+    can_export = True
+    export_types = ["csv"]
     page_size = 50
-    column_list = ["id", "owner_speaker_id", "status", "last_activity_at"]
+    page_size_options = [25, 50, 100]
+    column_list = ["owner_speaker_id", "day_identifier", "status", "last_activity_at", "id"]
     column_details_list = [
-        "id",
         "owner_speaker_id",
+        "day_identifier",
         "status",
         "last_activity_at",
         "created_at",
+        "id",
         "meta",
     ]
     column_searchable_list = ["id", "owner_speaker_id"]
-    column_filters = [AllUniqueStringValuesFilter(Conversation.status, title="Status")]
+    column_sortable_list = [
+        Conversation.last_activity_at,
+        Conversation.created_at,
+        Conversation.day_identifier,
+        Conversation.status,
+    ]
+    column_default_sort = (Conversation.last_activity_at, True)
+    column_filters = [
+        AllUniqueStringValuesFilter(Conversation.status, title="Status"),
+        OperationColumnFilter(Conversation.day_identifier, title="Day"),
+        OperationColumnFilter(Conversation.owner_speaker_id, title="User ID"),
+    ]
+    column_formatters = {
+        "last_activity_at": _fmt_dt,
+        "created_at": _fmt_dt,
+        "day_identifier": _fmt_day,
+    }
+    column_formatters_detail = {
+        "last_activity_at": _fmt_dt,
+        "created_at": _fmt_dt,
+        "day_identifier": _fmt_day,
+        "meta": _fmt_meta_detail,
+    }
     column_labels = {
         "id": "Conversation ID",
-        "owner_speaker_id": "Owner Speaker ID",
-        "last_activity_at": "Last Activity",
-        "created_at": "Created At",
+        "owner_speaker_id": "User",
+        "day_identifier": "Day",
+        "last_activity_at": "Last Active",
+        "created_at": "Started",
     }
 
 
@@ -91,44 +157,62 @@ class UtteranceAdmin(ModelView, model=Utterance):
     can_edit = False
     can_delete = False
     can_view_details = True
+    can_export = True
+    export_types = ["csv"]
     page_size = 50
+    page_size_options = [25, 50, 100]
     column_default_sort = [("timestamp", True), ("id", True)]
     column_list = [
-        "id",
-        "conversation_id",
         "speaker_id",
+        "conversation_id",
         "timestamp",
         "status",
+        "text",
         "error",
     ]
     column_details_list = [
-        "id",
-        "conversation_id",
         "speaker_id",
+        "conversation_id",
         "reply_to_id",
         "timestamp",
         "status",
         "text",
         "error",
         "created_at",
+        "id",
         "meta",
     ]
     column_searchable_list = ["text", "speaker_id", "conversation_id"]
+    column_sortable_list = [Utterance.timestamp, Utterance.status, Utterance.created_at]
     column_filters = [
         OperationColumnFilter(Utterance.speaker_id, title="User ID"),
+        OperationColumnFilter(Utterance.conversation_id, title="Conversation ID"),
         StaticValuesFilter(
             Utterance.status,
             values=[(status, status) for status in UTTERANCE_STATUSES],
             title="Status",
         ),
     ]
+    column_formatters = {
+        "timestamp": _fmt_dt,
+        "created_at": _fmt_dt,
+        "text": lambda m, a: (m.text[:100] + "…") if m.text and len(m.text) > 100 else (m.text or "—"),
+    }
+    column_formatters_detail = {
+        "timestamp": _fmt_dt,
+        "created_at": _fmt_dt,
+        "meta": _fmt_meta_detail,
+    }
     column_labels = {
         "id": "Utterance ID",
-        "conversation_id": "Conversation ID",
-        "speaker_id": "User ID",
+        "conversation_id": "Conversation",
+        "speaker_id": "User",
         "reply_to_id": "Reply To",
-        "timestamp": "Timestamp",
-        "created_at": "Created At",
+        "timestamp": "Time",
+        "created_at": "Created",
+        "text": "Message",
+        "error": "Error",
+        "status": "Status",
     }
 
 

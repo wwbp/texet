@@ -7,7 +7,6 @@ from typing import Any, cast
 import httpx
 from fastapi import BackgroundTasks
 from kani import ChatMessage, Kani  # type: ignore[import-untyped]
-from kani.engines.openai import OpenAIEngine  # type: ignore[import-untyped]
 from openai import AsyncOpenAI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import (
@@ -35,32 +34,34 @@ from app.config import (
     get_mail_validate_certs,
     get_moderation_alert_emails,
     get_openai_api_key,
-    get_openai_model,
     get_sms_outbound_authorization,
     get_sms_outbound_url,
     get_sms_timeout_seconds,
 )
 from app.db import get_sessionmaker
-from app.models.response import Utterance
+from app.engines.factory import create_engine as _create_engine
+from app.models.response import Conversation, Utterance
 from app.response.crud import (
     bot_speaker_id,
     build_chat_history,
     create_queued_utterance,
     create_utterance,
+    get_daily_prompt,
+    get_latest_system_prompt,
     get_or_create_bot_speaker,
     get_or_create_conversation,
     get_or_create_speaker,
     get_or_create_system_prompt,
     get_weekly_summary,
 )
-from app.response.utils import week_start_utc
+from app.response.prompt import compose_instruction_prompt
 from app.response.schemas import (
     ChatQueuedResponse,
     ChatRequest,
     ResponseQueuedResponse,
     ResponseRequest,
 )
-
+from app.response.utils import week_start_utc
 
 _USER_QUEUE_LOCKS: dict[str, asyncio.Lock] = {}
 _USER_QUEUE_LOCKS_GUARD = asyncio.Lock()
@@ -97,15 +98,15 @@ async def _get_user_queue_lock(user_id: str) -> asyncio.Lock:
         return lock
 
 
-async def _generate_reply(chat_history: list[ChatMessage], query: str, system_prompt: str) -> str:
-    api_key = get_openai_api_key()
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is not set.")
-    model = get_openai_model()
-    if not model:
-        raise RuntimeError("OPENAI_MODEL is not set.")
-
-    engine = OpenAIEngine(api_key=api_key, model=model)
+async def _generate_reply(
+    chat_history: list[ChatMessage],
+    query: str,
+    system_prompt: str,
+    *,
+    provider: str = "openai",
+    model_id: str = "gpt-4o-mini",
+) -> str:
+    engine = _create_engine(provider, model_id)
     kani = Kani(engine=engine, system_prompt=system_prompt)
     kani.chat_history = chat_history
 
@@ -357,9 +358,33 @@ async def _process_queued_reply(
     )
 
     prev_summary = await get_weekly_summary(session, user_id, prev_week_start)
-    system_prompt = await get_or_create_system_prompt(session)
-    if prev_summary:
-        system_prompt = f"{system_prompt}\n\n[Previous week summary]\n{prev_summary}"
+    sp = await get_latest_system_prompt(session)
+    base_prompt = await get_or_create_system_prompt(session)
+    provider = sp.provider if sp else "openai"
+    model_id = sp.model_id if sp else "gpt-4o-mini"
+
+    day_identifier: int | None = None
+    if user_utterance.meta:
+        raw = user_utterance.meta.get("day_identifier")
+        if isinstance(raw, int):
+            day_identifier = raw
+
+    daily_prompt = await get_daily_prompt(session, day_identifier) if day_identifier is not None else None
+    daily_content = daily_prompt.content if daily_prompt else None
+
+    system_prompt = compose_instruction_prompt(
+        base=base_prompt,
+        daily_content=daily_content,
+        weekly_summary=prev_summary,
+    )
+
+    conversation = await session.get(Conversation, user_utterance.conversation_id)
+    if conversation is not None:
+        prompt_meta: dict[str, Any] = {"texet_instruction_prompt": system_prompt}
+        if day_identifier is not None:
+            prompt_meta["texet_day_identifier"] = day_identifier
+        conversation.meta = _merge_meta(conversation.meta, prompt_meta)
+        await session.flush()
 
     chat_history = await build_chat_history(
         session,
@@ -370,7 +395,9 @@ async def _process_queued_reply(
         since_timestamp=week_start_dt,
     )
 
-    reply_text = await _generate_reply(chat_history, user_utterance.text, system_prompt)
+    reply_text = await _generate_reply(
+        chat_history, user_utterance.text, system_prompt, provider=provider, model_id=model_id
+    )
 
     reply_blocked, _, blocked_category, blocked_score = await _moderate_text(reply_text)
     if reply_blocked:
@@ -448,11 +475,19 @@ async def process_chat(
     background_tasks: BackgroundTasks,
     meta: dict[str, Any] | None = None,
 ) -> ChatQueuedResponse:
+    day_identifier: int | None = None
+    if meta:
+        raw = meta.get("day_identifier")
+        if isinstance(raw, int):
+            day_identifier = raw
+
     async with session.begin():
         speaker = await get_or_create_speaker(session, payload.user_id, meta={"type": "user"})
         bot = await get_or_create_bot_speaker(session, payload.user_id)
 
-        conversation = await get_or_create_conversation(session, speaker.id)
+        conversation = await get_or_create_conversation(
+            session, speaker.id, day_identifier=day_identifier
+        )
 
         user_utterance = await create_utterance(
             session,
