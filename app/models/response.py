@@ -76,6 +76,12 @@ class SystemPrompt(Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    provider: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="openai", server_default="openai"
+    )
+    model_id: Mapped[str] = mapped_column(
+        String(255), nullable=False, default="gpt-4o-mini", server_default="gpt-4o-mini"
+    )
 
 
 class WeeklySummary(Base):

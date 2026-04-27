@@ -326,7 +326,7 @@ async def test_drain_user_queue_processes_same_user_in_sequence(
         return False, "", "", 0.0
 
     async def _fake_generate_reply(
-        chat_history: list[object], query: str, system_prompt: str
+        chat_history: list[object], query: str, system_prompt: str, **_kwargs: object
     ) -> str:
         history = [
             (msg.role.value, msg.content)  # type: ignore[attr-defined]

@@ -71,7 +71,7 @@ def kani_stub(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
     calls: list[dict[str, object]] = []
 
     async def _fake_generate_reply(
-        chat_history: list[object], query: str, system_prompt: str
+        chat_history: list[object], query: str, system_prompt: str, **_kwargs: object
     ) -> str:
         history = [
             (msg.role.value, msg.content)  # type: ignore[attr-defined]
@@ -524,7 +524,7 @@ async def test_response_moderates_generated_reply_and_persists_raw_output(
     moderation_notice = "A generated reply was moderated due to violence content with score 0.91."
 
     async def _fake_generate_reply(
-        chat_history: list[object], query: str, system_prompt: str
+        chat_history: list[object], query: str, system_prompt: str, **_kwargs: object
     ) -> str:
         return raw_reply
 
@@ -573,7 +573,7 @@ async def test_response_marks_failed_on_generation_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def _fail_generate_reply(
-        chat_history: list[object], query: str, system_prompt: str
+        chat_history: list[object], query: str, system_prompt: str, **_kwargs: object
     ) -> str:
         raise RuntimeError("kani down")
 

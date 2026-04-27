@@ -114,6 +114,13 @@ async def get_or_create_conversation(
     return conversation
 
 
+async def get_latest_system_prompt(session: AsyncSession) -> SystemPrompt | None:
+    result = await session.execute(
+        select(SystemPrompt).order_by(SystemPrompt.created_at.desc()).limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
 async def get_or_create_system_prompt(session: AsyncSession) -> str:
     result = await session.execute(
         select(SystemPrompt).order_by(SystemPrompt.created_at.desc()).limit(1)

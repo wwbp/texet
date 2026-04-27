@@ -87,6 +87,21 @@ def get_openai_api_key() -> str:
     return os.getenv("OPENAI_API_KEY", "")
 
 
+def get_aws_access_key_id() -> str:
+    return os.getenv("AWS_ACCESS_KEY_ID", "")
+
+
+def get_aws_secret_access_key() -> str:
+    return os.getenv("AWS_SECRET_ACCESS_KEY", "")
+
+
+def get_aws_region() -> str:
+    return os.getenv("AWS_REGION", "us-east-1")
+
+
+BEDROCK_DEFAULT_MODEL: Final[str] = "us.anthropic.claude-sonnet-4-6"
+
+
 # OPENAI_MODEL: OpenAI model name.
 def get_openai_model() -> str:
     return os.getenv("OPENAI_MODEL", "")

@@ -4,10 +4,29 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
 
-from app.config import CONSOLE_PREFIX
+from app.config import BEDROCK_DEFAULT_MODEL, CONSOLE_PREFIX
 from app.console.core import _escape, _serialize_datetime, console_router, require_admin
 from app.db import get_async_session
 from app.models.response import SystemPrompt
+
+
+_PROVIDER_OPTIONS = [
+    ("openai", "OpenAI"),
+    ("bedrock", "Amazon Bedrock"),
+]
+
+_MODEL_DEFAULTS: dict[str, str] = {
+    "openai": "gpt-4o-mini",
+    "bedrock": BEDROCK_DEFAULT_MODEL,
+}
+
+
+def _provider_select(selected: str, name: str = "provider") -> str:
+    opts = "".join(
+        f'<option value="{v}" {"selected" if v == selected else ""}>{label}</option>'
+        for v, label in _PROVIDER_OPTIONS
+    )
+    return f'<select name="{name}" style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;">{opts}</select>'
 
 
 def _render_system_prompts_page(
@@ -26,6 +45,9 @@ def _render_system_prompts_page(
               <td>
                 <form method="post" action="{CONSOLE_PREFIX}/system-prompts/{_escape(prompt.id)}">
                   <textarea name="prompt" rows="3" required>{_escape(prompt.prompt)}</textarea>
+                  {_provider_select(prompt.provider)}
+                  <input name="model_id" required value="{_escape(prompt.model_id)}"
+                         style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;" />
                   <div class="actions">
                     <button type="submit">Update</button>
                   </div>
@@ -132,6 +154,9 @@ def _render_system_prompts_page(
           <h2>Add prompt</h2>
           <form class="create-form" method="post" action="{CONSOLE_PREFIX}/system-prompts">
             <textarea name="prompt" rows="4" required placeholder="System prompt"></textarea>
+            {_provider_select("openai")}
+            <input name="model_id" required value="gpt-4o-mini" placeholder="Model ID"
+                   style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;margin-top:6px;" />
             <div class="actions">
               <button type="submit">Add prompt</button>
             </div>
@@ -185,11 +210,15 @@ async def console_system_prompts_create(
 ) -> HTMLResponse:
     form = await request.form()
     value = str(form.get("prompt") or "").strip()
+    provider = str(form.get("provider") or "openai").strip()
+    model_id = str(form.get("model_id") or _MODEL_DEFAULTS.get(provider, "gpt-4o-mini")).strip()
     if not value:
         return _render_system_prompts_page(await _list_prompts(session), "Prompt is required.")
+    if provider not in _MODEL_DEFAULTS:
+        return _render_system_prompts_page(await _list_prompts(session), f"Unknown provider: {provider}")
 
     async with session.begin():
-        session.add(SystemPrompt(prompt=value))
+        session.add(SystemPrompt(prompt=value, provider=provider, model_id=model_id))
     return _render_system_prompts_page(await _list_prompts(session))
 
 
@@ -202,14 +231,20 @@ async def console_system_prompts_update(
 ) -> HTMLResponse:
     form = await request.form()
     value = str(form.get("prompt") or "").strip()
+    provider = str(form.get("provider") or "openai").strip()
+    model_id = str(form.get("model_id") or _MODEL_DEFAULTS.get(provider, "gpt-4o-mini")).strip()
     if not value:
         return _render_system_prompts_page(await _list_prompts(session), "Prompt is required.")
+    if provider not in _MODEL_DEFAULTS:
+        return _render_system_prompts_page(await _list_prompts(session), f"Unknown provider: {provider}")
 
     async with session.begin():
         prompt = await session.get(SystemPrompt, prompt_id)
         if not prompt:
             return _render_system_prompts_page(await _list_prompts(session), "Prompt not found.")
         prompt.prompt = value
+        prompt.provider = provider
+        prompt.model_id = model_id
 
     return _render_system_prompts_page(await _list_prompts(session))
 

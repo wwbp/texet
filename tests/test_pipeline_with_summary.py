@@ -33,7 +33,7 @@ async def test_pipeline_injects_summary_into_system_prompt(
     captured: dict[str, object] = {}
 
     async def _fake_generate_reply(
-        chat_history: list[object], query: str, system_prompt: str
+        chat_history: list[object], query: str, system_prompt: str, **_kwargs: object
     ) -> str:
         captured["system_prompt"] = system_prompt
         captured["history_len"] = len(chat_history)
@@ -91,7 +91,7 @@ async def test_pipeline_uses_base_prompt_when_no_summary(
     captured: dict[str, object] = {}
 
     async def _fake_generate_reply(
-        chat_history: list[object], query: str, system_prompt: str
+        chat_history: list[object], query: str, system_prompt: str, **_kwargs: object
     ) -> str:
         captured["system_prompt"] = system_prompt
         return "ok"
@@ -139,7 +139,7 @@ async def test_pipeline_chat_history_limited_to_current_week(
     captured: dict[str, object] = {}
 
     async def _fake_generate_reply(
-        chat_history: list[object], query: str, system_prompt: str
+        chat_history: list[object], query: str, system_prompt: str, **_kwargs: object
     ) -> str:
         captured["history"] = [(m.role.value, m.content) for m in chat_history]  # type: ignore[attr-defined]
         return "ok"

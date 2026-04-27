@@ -7,7 +7,6 @@ from typing import Any, cast
 import httpx
 from fastapi import BackgroundTasks
 from kani import ChatMessage, Kani  # type: ignore[import-untyped]
-from kani.engines.openai import OpenAIEngine  # type: ignore[import-untyped]
 from openai import AsyncOpenAI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import (
@@ -35,18 +34,19 @@ from app.config import (
     get_mail_validate_certs,
     get_moderation_alert_emails,
     get_openai_api_key,
-    get_openai_model,
     get_sms_outbound_authorization,
     get_sms_outbound_url,
     get_sms_timeout_seconds,
 )
 from app.db import get_sessionmaker
+from app.engines.factory import create_engine as _create_engine
 from app.models.response import Utterance
 from app.response.crud import (
     bot_speaker_id,
     build_chat_history,
     create_queued_utterance,
     create_utterance,
+    get_latest_system_prompt,
     get_or_create_bot_speaker,
     get_or_create_conversation,
     get_or_create_speaker,
@@ -97,15 +97,15 @@ async def _get_user_queue_lock(user_id: str) -> asyncio.Lock:
         return lock
 
 
-async def _generate_reply(chat_history: list[ChatMessage], query: str, system_prompt: str) -> str:
-    api_key = get_openai_api_key()
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is not set.")
-    model = get_openai_model()
-    if not model:
-        raise RuntimeError("OPENAI_MODEL is not set.")
-
-    engine = OpenAIEngine(api_key=api_key, model=model)
+async def _generate_reply(
+    chat_history: list[ChatMessage],
+    query: str,
+    system_prompt: str,
+    *,
+    provider: str = "openai",
+    model_id: str = "gpt-4o-mini",
+) -> str:
+    engine = _create_engine(provider, model_id)
     kani = Kani(engine=engine, system_prompt=system_prompt)
     kani.chat_history = chat_history
 
@@ -357,7 +357,10 @@ async def _process_queued_reply(
     )
 
     prev_summary = await get_weekly_summary(session, user_id, prev_week_start)
+    sp = await get_latest_system_prompt(session)
     system_prompt = await get_or_create_system_prompt(session)
+    provider = sp.provider if sp else "openai"
+    model_id = sp.model_id if sp else "gpt-4o-mini"
     if prev_summary:
         system_prompt = f"{system_prompt}\n\n[Previous week summary]\n{prev_summary}"
 
@@ -370,7 +373,9 @@ async def _process_queued_reply(
         since_timestamp=week_start_dt,
     )
 
-    reply_text = await _generate_reply(chat_history, user_utterance.text, system_prompt)
+    reply_text = await _generate_reply(
+        chat_history, user_utterance.text, system_prompt, provider=provider, model_id=model_id
+    )
 
     reply_blocked, _, blocked_category, blocked_score = await _moderate_text(reply_text)
     if reply_blocked:
