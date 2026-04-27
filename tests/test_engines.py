@@ -8,7 +8,6 @@ from kani.models import ChatMessage, ChatRole  # type: ignore[import-untyped]
 from app.engines.bedrock import BedrockEngine
 from app.engines.factory import create_engine
 
-
 # ---------------------------------------------------------------------------
 # BedrockEngine unit tests
 # ---------------------------------------------------------------------------

@@ -9,6 +9,10 @@ from app.console.core import _escape, _serialize_datetime, console_router, requi
 from app.db import get_async_session
 from app.models.response import SystemPrompt
 
+_INPUT_STYLE = (
+    "width:100%;padding:6px;border:1px solid var(--border);"
+    "border-radius:8px;font-size:13px;"
+)
 
 _PROVIDER_OPTIONS = [
     ("openai", "OpenAI"),
@@ -26,7 +30,8 @@ def _provider_select(selected: str, name: str = "provider") -> str:
         f'<option value="{v}" {"selected" if v == selected else ""}>{label}</option>'
         for v, label in _PROVIDER_OPTIONS
     )
-    return f'<select name="{name}" style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;">{opts}</select>'
+    style = "padding:6px 10px;border:1px solid var(--border);border-radius:8px;"
+    return f'<select name="{name}" style="{style}">{opts}</select>'
 
 
 def _render_system_prompts_page(
@@ -47,7 +52,7 @@ def _render_system_prompts_page(
                   <textarea name="prompt" rows="3" required>{_escape(prompt.prompt)}</textarea>
                   {_provider_select(prompt.provider)}
                   <input name="model_id" required value="{_escape(prompt.model_id)}"
-                         style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;" />
+                         style="{_INPUT_STYLE}" />
                   <div class="actions">
                     <button type="submit">Update</button>
                   </div>
@@ -156,7 +161,7 @@ def _render_system_prompts_page(
             <textarea name="prompt" rows="4" required placeholder="System prompt"></textarea>
             {_provider_select("openai")}
             <input name="model_id" required value="gpt-4o-mini" placeholder="Model ID"
-                   style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;margin-top:6px;" />
+                   style="{_INPUT_STYLE}margin-top:6px;" />
             <div class="actions">
               <button type="submit">Add prompt</button>
             </div>
@@ -215,7 +220,9 @@ async def console_system_prompts_create(
     if not value:
         return _render_system_prompts_page(await _list_prompts(session), "Prompt is required.")
     if provider not in _MODEL_DEFAULTS:
-        return _render_system_prompts_page(await _list_prompts(session), f"Unknown provider: {provider}")
+        return _render_system_prompts_page(
+            await _list_prompts(session), f"Unknown provider: {provider}"
+        )
 
     async with session.begin():
         session.add(SystemPrompt(prompt=value, provider=provider, model_id=model_id))
@@ -236,7 +243,9 @@ async def console_system_prompts_update(
     if not value:
         return _render_system_prompts_page(await _list_prompts(session), "Prompt is required.")
     if provider not in _MODEL_DEFAULTS:
-        return _render_system_prompts_page(await _list_prompts(session), f"Unknown provider: {provider}")
+        return _render_system_prompts_page(
+            await _list_prompts(session), f"Unknown provider: {provider}"
+        )
 
     async with session.begin():
         prompt = await session.get(SystemPrompt, prompt_id)

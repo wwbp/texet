@@ -25,13 +25,19 @@ _SUNDAY = datetime.date(2026, 4, 12)  # known Sunday
         # Sunday itself → same day
         (datetime.datetime(2026, 4, 12, 0, 0, 0, tzinfo=datetime.UTC), datetime.date(2026, 4, 12)),
         # Sunday at end of day
-        (datetime.datetime(2026, 4, 12, 23, 59, 59, tzinfo=datetime.UTC), datetime.date(2026, 4, 12)),
+        (
+            datetime.datetime(2026, 4, 12, 23, 59, 59, tzinfo=datetime.UTC),
+            datetime.date(2026, 4, 12),
+        ),
         # Monday → back to Sunday
         (datetime.datetime(2026, 4, 13, 8, 0, 0, tzinfo=datetime.UTC), datetime.date(2026, 4, 12)),
         # Wednesday mid-week
         (datetime.datetime(2026, 4, 15, 12, 0, 0, tzinfo=datetime.UTC), datetime.date(2026, 4, 12)),
         # Saturday → back to Sunday
-        (datetime.datetime(2026, 4, 18, 23, 59, 0, tzinfo=datetime.UTC), datetime.date(2026, 4, 12)),
+        (
+            datetime.datetime(2026, 4, 18, 23, 59, 0, tzinfo=datetime.UTC),
+            datetime.date(2026, 4, 12),
+        ),
         # Next Sunday → new week
         (datetime.datetime(2026, 4, 19, 0, 0, 0, tzinfo=datetime.UTC), datetime.date(2026, 4, 19)),
     ],

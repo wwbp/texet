@@ -53,14 +53,13 @@ from app.response.crud import (
     get_or_create_system_prompt,
     get_weekly_summary,
 )
-from app.response.utils import week_start_utc
 from app.response.schemas import (
     ChatQueuedResponse,
     ChatRequest,
     ResponseQueuedResponse,
     ResponseRequest,
 )
-
+from app.response.utils import week_start_utc
 
 _USER_QUEUE_LOCKS: dict[str, asyncio.Lock] = {}
 _USER_QUEUE_LOCKS_GUARD = asyncio.Lock()

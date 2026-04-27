@@ -15,7 +15,6 @@ from app.response.crud import (
     get_or_create_speaker,
     get_weekly_summary,
 )
-from app.summary import service as summary_service
 from app.summary.service import build_week_transcript, generate_user_weekly_summary
 
 _WEEK_START = datetime.date(2026, 4, 12)

@@ -11,7 +11,6 @@ from app.models.response import Utterance
 from app.response import service as response_service
 from app.response.crud import (
     bot_speaker_id,
-    get_weekly_summary,
     upsert_weekly_summary,
 )
 from app.response.utils import week_start_utc
@@ -74,8 +73,12 @@ async def run_weekly_summaries(sessionmaker: async_sessionmaker[AsyncSession]) -
     now_utc = datetime.datetime.now(datetime.UTC)
     current_week_start = week_start_utc(now_utc)
     prev_week_start = current_week_start - datetime.timedelta(days=7)
-    week_start_dt = datetime.datetime.combine(prev_week_start, datetime.time.min, tzinfo=datetime.UTC)
-    week_end_dt = datetime.datetime.combine(current_week_start, datetime.time.min, tzinfo=datetime.UTC)
+    week_start_dt = datetime.datetime.combine(
+        prev_week_start, datetime.time.min, tzinfo=datetime.UTC
+    )
+    week_end_dt = datetime.datetime.combine(
+        current_week_start, datetime.time.min, tzinfo=datetime.UTC
+    )
 
     async with sessionmaker() as session:
         result = await session.execute(
