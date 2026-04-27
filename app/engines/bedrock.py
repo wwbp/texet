@@ -26,12 +26,16 @@ class BedrockCompletion(BaseCompletion):
 
 
 _CONTEXT_SIZES: dict[str, int] = {
+    # Anthropic Claude
     "us.anthropic.claude-sonnet-4-6": 200_000,
     "us.anthropic.claude-sonnet-4-5": 200_000,
     "anthropic.claude-3-5-sonnet-20241022-v2:0": 200_000,
     "anthropic.claude-3-5-sonnet-20240620-v1:0": 200_000,
     "anthropic.claude-3-sonnet-20240229-v1:0": 200_000,
     "anthropic.claude-3-haiku-20240307-v1:0": 200_000,
+    # Meta Llama
+    "meta.llama3-3-70b-instruct-v1:0": 128_000,
+    "us.meta.llama3-3-70b-instruct-v1:0": 128_000,
 }
 
 

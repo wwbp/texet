@@ -29,6 +29,44 @@ def test_bedrock_engine_context_size(bedrock_engine: BedrockEngine) -> None:
     assert bedrock_engine.max_context_size == 200_000
 
 
+def test_llama_engine_context_size(monkeypatch: pytest.MonkeyPatch) -> None:
+    with patch("boto3.client"):
+        engine = BedrockEngine(model_id="meta.llama3-3-70b-instruct-v1:0")
+    assert engine.max_context_size == 128_000
+
+
+def test_llama_cross_region_engine_context_size(monkeypatch: pytest.MonkeyPatch) -> None:
+    with patch("boto3.client"):
+        engine = BedrockEngine(model_id="us.meta.llama3-3-70b-instruct-v1:0")
+    assert engine.max_context_size == 128_000
+
+
+@pytest.mark.asyncio
+async def test_llama_predict_routes_system_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Llama on Bedrock Converse API: system messages routed to system= same as Claude."""
+    with patch("boto3.client"):
+        engine = BedrockEngine(model_id="meta.llama3-3-70b-instruct-v1:0")
+
+    captured: dict = {}
+
+    def _fake_call(system_blocks: list, messages: list) -> dict:
+        captured["system"] = system_blocks
+        captured["messages"] = messages
+        return _make_bedrock_response("Bonjour!")
+
+    engine._call_bedrock = _fake_call  # type: ignore[method-assign]
+
+    chat = [
+        ChatMessage(role=ChatRole.SYSTEM, content="Reply in French."),
+        ChatMessage(role=ChatRole.USER, content="Hello"),
+    ]
+    result = await engine.predict(chat)
+
+    assert captured["system"] == [{"text": "Reply in French."}]
+    assert captured["messages"] == [{"role": "user", "content": [{"text": "Hello"}]}]
+    assert result.message.content == "Bonjour!"
+
+
 def test_bedrock_engine_message_len(bedrock_engine: BedrockEngine) -> None:
     msg = ChatMessage(role=ChatRole.USER, content="hello world")
     assert bedrock_engine.message_len(msg) >= 1
