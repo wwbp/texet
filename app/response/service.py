@@ -40,12 +40,13 @@ from app.config import (
 )
 from app.db import get_sessionmaker
 from app.engines.factory import create_engine as _create_engine
-from app.models.response import Utterance
+from app.models.response import Conversation, Utterance
 from app.response.crud import (
     bot_speaker_id,
     build_chat_history,
     create_queued_utterance,
     create_utterance,
+    get_daily_prompt,
     get_latest_system_prompt,
     get_or_create_bot_speaker,
     get_or_create_conversation,
@@ -53,6 +54,7 @@ from app.response.crud import (
     get_or_create_system_prompt,
     get_weekly_summary,
 )
+from app.response.prompt import compose_instruction_prompt
 from app.response.schemas import (
     ChatQueuedResponse,
     ChatRequest,
@@ -357,11 +359,32 @@ async def _process_queued_reply(
 
     prev_summary = await get_weekly_summary(session, user_id, prev_week_start)
     sp = await get_latest_system_prompt(session)
-    system_prompt = await get_or_create_system_prompt(session)
+    base_prompt = await get_or_create_system_prompt(session)
     provider = sp.provider if sp else "openai"
     model_id = sp.model_id if sp else "gpt-4o-mini"
-    if prev_summary:
-        system_prompt = f"{system_prompt}\n\n[Previous week summary]\n{prev_summary}"
+
+    day_identifier: int | None = None
+    if user_utterance.meta:
+        raw = user_utterance.meta.get("day_identifier")
+        if isinstance(raw, int):
+            day_identifier = raw
+
+    daily_prompt = await get_daily_prompt(session, day_identifier) if day_identifier is not None else None
+    daily_content = daily_prompt.content if daily_prompt else None
+
+    system_prompt = compose_instruction_prompt(
+        base=base_prompt,
+        daily_content=daily_content,
+        weekly_summary=prev_summary,
+    )
+
+    conversation = await session.get(Conversation, user_utterance.conversation_id)
+    if conversation is not None:
+        prompt_meta: dict[str, Any] = {"texet_instruction_prompt": system_prompt}
+        if day_identifier is not None:
+            prompt_meta["texet_day_identifier"] = day_identifier
+        conversation.meta = _merge_meta(conversation.meta, prompt_meta)
+        await session.flush()
 
     chat_history = await build_chat_history(
         session,
@@ -452,11 +475,19 @@ async def process_chat(
     background_tasks: BackgroundTasks,
     meta: dict[str, Any] | None = None,
 ) -> ChatQueuedResponse:
+    day_identifier: int | None = None
+    if meta:
+        raw = meta.get("day_identifier")
+        if isinstance(raw, int):
+            day_identifier = raw
+
     async with session.begin():
         speaker = await get_or_create_speaker(session, payload.user_id, meta={"type": "user"})
         bot = await get_or_create_bot_speaker(session, payload.user_id)
 
-        conversation = await get_or_create_conversation(session, speaker.id)
+        conversation = await get_or_create_conversation(
+            session, speaker.id, day_identifier=day_identifier
+        )
 
         user_utterance = await create_utterance(
             session,

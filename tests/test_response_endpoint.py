@@ -622,3 +622,72 @@ async def test_response_marks_failed_on_sms_error(
     bot_utterance = result.scalar_one()
     assert bot_utterance.status == UTTERANCE_STATUS_FAILED
     assert bot_utterance.error is not None
+
+
+@pytest.mark.asyncio
+async def test_response_creates_conversation_scoped_to_day_identifier(
+    async_client: AsyncClient,
+    async_session: AsyncSession,
+    sms_outbox: list[dict[str, str]],
+) -> None:
+    response = await async_client.post(
+        "/response",
+        headers={"Authorization": f"Bearer {API_KEY}"},
+        json={"user_id": "u-day-scope", "input": "hello", "metadata": {"day_identifier": 3}},
+    )
+    assert response.status_code == 202
+    conv_id = response.json()["conversation_id"]
+
+    async_session.expire_all()
+    conv = await async_session.get(Conversation, conv_id)
+    assert conv is not None
+    assert conv.day_identifier == 3
+
+
+@pytest.mark.asyncio
+async def test_response_same_day_reuses_conversation(
+    async_client: AsyncClient,
+    async_session: AsyncSession,
+    sms_outbox: list[dict[str, str]],
+) -> None:
+    first = await async_client.post(
+        "/response",
+        headers={"Authorization": f"Bearer {API_KEY}"},
+        json={"user_id": "u-day-reuse", "input": "first", "metadata": {"day_identifier": 5}},
+    )
+    second = await async_client.post(
+        "/response",
+        headers={"Authorization": f"Bearer {API_KEY}"},
+        json={"user_id": "u-day-reuse", "input": "second", "metadata": {"day_identifier": 5}},
+    )
+    assert first.json()["conversation_id"] == second.json()["conversation_id"]
+
+
+@pytest.mark.asyncio
+async def test_response_different_day_creates_new_conversation(
+    async_client: AsyncClient,
+    async_session: AsyncSession,
+    sms_outbox: list[dict[str, str]],
+) -> None:
+    day1 = await async_client.post(
+        "/response",
+        headers={"Authorization": f"Bearer {API_KEY}"},
+        json={"user_id": "u-day-new", "input": "day one", "metadata": {"day_identifier": 1}},
+    )
+    day2 = await async_client.post(
+        "/response",
+        headers={"Authorization": f"Bearer {API_KEY}"},
+        json={"user_id": "u-day-new", "input": "day two", "metadata": {"day_identifier": 2}},
+    )
+    assert day1.status_code == 202
+    assert day2.status_code == 202
+    assert day1.json()["conversation_id"] != day2.json()["conversation_id"]
+
+    async_session.expire_all()
+    result = await async_session.execute(
+        select(Conversation).where(Conversation.owner_speaker_id == "u-day-new")
+    )
+    conversations = result.scalars().all()
+    assert len(conversations) == 2
+    day_ids = {c.day_identifier for c in conversations}
+    assert day_ids == {1, 2}
