@@ -551,9 +551,7 @@ async def test_run_deferred_reply_sms_failure_does_not_commit_text(
         speaker = await get_or_create_speaker(async_session, "u-sms-fail", meta={"type": "user"})
         bot = await get_or_create_bot_speaker(async_session, "u-sms-fail")
         conversation = await get_or_create_conversation(async_session, speaker.id)
-        user_utterance = await create_utterance(
-            async_session, conversation.id, speaker.id, "hi"
-        )
+        user_utterance = await create_utterance(async_session, conversation.id, speaker.id, "hi")
         bot_utterance = await create_queued_utterance(
             async_session, conversation.id, bot.id, reply_to_id=user_utterance.id
         )

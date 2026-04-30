@@ -23,9 +23,7 @@ def test_base_with_all_sections() -> None:
         weekly_summary="Week 1 summary.",
     )
     assert result == (
-        "Base.\n\n"
-        "[Daily Activity]\nDay 5 activity.\n\n"
-        "[Previous week summary]\nWeek 1 summary."
+        "Base.\n\n[Daily Activity]\nDay 5 activity.\n\n[Previous week summary]\nWeek 1 summary."
     )
 
 

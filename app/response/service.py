@@ -84,10 +84,7 @@ def _merge_meta(
 
 def _moderation_notice(source: str, category: str, score: float) -> str:
     if source == "bot":
-        return (
-            f"A generated reply was moderated due to {category} content "
-            f"with score {score:.2f}."
-        )
+        return f"A generated reply was moderated due to {category} content with score {score:.2f}."
     return f"Your message was moderated due to {category} content with score {score:.2f}."
 
 
@@ -213,7 +210,7 @@ async def _send_moderation_email(
 
     conf = ConnectionConfig(
         MAIL_USERNAME=mail_username,
-        MAIL_PASSWORD=mail_password,
+        MAIL_PASSWORD=mail_password,  # type: ignore[arg-type]
         MAIL_FROM=mail_from,
         MAIL_PORT=get_mail_port(),
         MAIL_SERVER=mail_server,
@@ -243,7 +240,7 @@ async def _send_moderation_email(
 
     message = MessageSchema(
         subject=f"[texet] moderation blocked user={user_id} category={blocked_category}",
-        recipients=recipients,
+        recipients=recipients,  # type: ignore[arg-type]
         body=body,
         subtype=MessageType.plain,
     )
@@ -381,7 +378,9 @@ async def _process_queued_reply(
         if isinstance(raw, int):
             day_identifier = raw
 
-    daily_prompt = await get_daily_prompt(session, day_identifier) if day_identifier is not None else None
+    daily_prompt = (
+        await get_daily_prompt(session, day_identifier) if day_identifier is not None else None
+    )
     daily_content = daily_prompt.content if daily_prompt else None
 
     system_prompt = compose_instruction_prompt(

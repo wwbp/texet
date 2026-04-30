@@ -52,9 +52,7 @@ async def generate_user_weekly_summary(
         .where(
             Utterance.timestamp >= week_start_dt,
             Utterance.timestamp < week_end_dt,
-            Utterance.speaker_id.in_(
-                [user_id, bot_speaker_id(user_id)]
-            ),
+            Utterance.speaker_id.in_([user_id, bot_speaker_id(user_id)]),
         )
         .order_by(Utterance.timestamp)
     )

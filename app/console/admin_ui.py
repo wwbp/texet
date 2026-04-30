@@ -52,6 +52,13 @@ def _fmt_day(m: object, a: str) -> str:
     return str(v) if v is not None else "—"
 
 
+def _fmt_text_truncated(m: object, a: str) -> str:
+    text: str | None = getattr(m, "text", None)
+    if text and len(text) > 100:
+        return text[:100] + "…"
+    return text or "—"
+
+
 class AdminAuth(AuthenticationBackend):
     async def login(self, request: Request) -> bool:
         form = await request.form()
@@ -91,8 +98,8 @@ class SpeakerAdmin(ModelView, model=Speaker):
     column_searchable_list = ["id"]
     column_sortable_list = [Speaker.created_at]
     column_default_sort = (Speaker.created_at, True)
-    column_formatters = {"created_at": _fmt_dt}
-    column_formatters_detail = {"meta": _fmt_meta_detail}
+    column_formatters = {"created_at": _fmt_dt}  # type: ignore[dict-item]
+    column_formatters_detail = {"meta": _fmt_meta_detail}  # type: ignore[dict-item]
     column_labels = {"id": "Speaker ID", "created_at": "Joined"}
 
 
@@ -131,15 +138,15 @@ class ConversationAdmin(ModelView, model=Conversation):
         OperationColumnFilter(Conversation.owner_speaker_id, title="User ID"),
     ]
     column_formatters = {
-        "last_activity_at": _fmt_dt,
-        "created_at": _fmt_dt,
-        "day_identifier": _fmt_day,
+        "last_activity_at": _fmt_dt,  # type: ignore[dict-item]
+        "created_at": _fmt_dt,  # type: ignore[dict-item]
+        "day_identifier": _fmt_day,  # type: ignore[dict-item]
     }
     column_formatters_detail = {
-        "last_activity_at": _fmt_dt,
-        "created_at": _fmt_dt,
-        "day_identifier": _fmt_day,
-        "meta": _fmt_meta_detail,
+        "last_activity_at": _fmt_dt,  # type: ignore[dict-item]
+        "created_at": _fmt_dt,  # type: ignore[dict-item]
+        "day_identifier": _fmt_day,  # type: ignore[dict-item]
+        "meta": _fmt_meta_detail,  # type: ignore[dict-item]
     }
     column_labels = {
         "id": "Conversation ID",
@@ -194,14 +201,14 @@ class UtteranceAdmin(ModelView, model=Utterance):
         ),
     ]
     column_formatters = {
-        "timestamp": _fmt_dt,
-        "created_at": _fmt_dt,
-        "text": lambda m, a: (m.text[:100] + "…") if m.text and len(m.text) > 100 else (m.text or "—"),
+        "timestamp": _fmt_dt,  # type: ignore[dict-item]
+        "created_at": _fmt_dt,  # type: ignore[dict-item]
+        "text": _fmt_text_truncated,  # type: ignore[dict-item]
     }
     column_formatters_detail = {
-        "timestamp": _fmt_dt,
-        "created_at": _fmt_dt,
-        "meta": _fmt_meta_detail,
+        "timestamp": _fmt_dt,  # type: ignore[dict-item]
+        "created_at": _fmt_dt,  # type: ignore[dict-item]
+        "meta": _fmt_meta_detail,  # type: ignore[dict-item]
     }
     column_labels = {
         "id": "Utterance ID",

@@ -70,9 +70,7 @@ def test_build_week_transcript_empty_returns_empty_string() -> None:
 async def test_generate_user_weekly_summary_stores_result(
     async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def _fake_generate_reply(
-        _history: list[object], query: str, system_prompt: str
-    ) -> str:
+    async def _fake_generate_reply(_history: list[object], query: str, system_prompt: str) -> str:
         assert "user: hello" in query
         assert "bot:" in query
         return "User greeted the bot and had a brief exchange."
@@ -135,9 +133,7 @@ async def test_generate_user_weekly_summary_excludes_moderated_from_transcript(
 ) -> None:
     captured: dict[str, str] = {}
 
-    async def _fake_generate_reply(
-        _history: list[object], query: str, _system_prompt: str
-    ) -> str:
+    async def _fake_generate_reply(_history: list[object], query: str, _system_prompt: str) -> str:
         captured["query"] = query
         return "clean summary"
 

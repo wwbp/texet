@@ -3,11 +3,11 @@ Service-level integration tests for daily prompt lookup and instruction prompt p
 Follows the same pattern as test_chat_background.py: real DB via async_session,
 all external calls (generate, SMS, moderation) monkeypatched.
 """
+
 from __future__ import annotations
 
-from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker
-
 import pytest
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker
 
 from app.models.response import Conversation, DailyPrompt
 from app.response import service as response_service

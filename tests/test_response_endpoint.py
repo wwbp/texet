@@ -508,9 +508,7 @@ async def test_response_does_not_fail_if_moderation_email_errors(
     ]
 
     async_session.expire_all()
-    bot_result = await async_session.execute(
-        select(Utterance).where(Utterance.id == body["id"])
-    )
+    bot_result = await async_session.execute(select(Utterance).where(Utterance.id == body["id"]))
     bot_utterance = bot_result.scalar_one()
     assert bot_utterance.status == UTTERANCE_STATUS_MODERATED
     assert bot_utterance.error is None
@@ -555,9 +553,7 @@ async def test_response_moderates_generated_reply_and_persists_raw_output(
     ]
 
     async_session.expire_all()
-    bot_result = await async_session.execute(
-        select(Utterance).where(Utterance.id == body["id"])
-    )
+    bot_result = await async_session.execute(select(Utterance).where(Utterance.id == body["id"]))
     bot_utterance = bot_result.scalar_one()
     assert bot_utterance.status == UTTERANCE_STATUS_MODERATED
     assert bot_utterance.text == raw_reply

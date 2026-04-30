@@ -4,12 +4,13 @@ Revision ID: 9fcf9a304b58
 Revises: 86eff0152bb6
 Create Date: 2026-04-03 12:37:38.825375
 """
+
 from __future__ import annotations
 
 from alembic import op
 
-revision = '9fcf9a304b58'
-down_revision = '86eff0152bb6'
+revision = "9fcf9a304b58"
+down_revision = "86eff0152bb6"
 branch_labels = None
 depends_on = None
 
