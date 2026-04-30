@@ -12,8 +12,6 @@ COPY pyproject.toml /app/pyproject.toml
 RUN uv pip install --system -r /app/pyproject.toml
 
 COPY app /app/app
-COPY tests /app/tests
-COPY pytest.ini /app/pytest.ini
 COPY alembic /app/alembic
 COPY alembic.ini /app/alembic.ini
 COPY scripts /app/scripts
