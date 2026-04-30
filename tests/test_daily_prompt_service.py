@@ -42,7 +42,12 @@ def _stub_pass_through(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
         captured["system_prompt"] = system_prompt
         return "ok"
 
-    async def _fake_sms(user_id: str, message: str, utterance_id: str) -> None:
+    async def _fake_sms(
+        user_id: str,
+        message: str,
+        utterance_id: str,
+        in_reply_to_utterance_id: str | None = None,
+    ) -> None:
         captured["sent"] = message
 
     monkeypatch.setattr(response_service, "_moderate_message", _allow)

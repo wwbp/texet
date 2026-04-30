@@ -121,7 +121,12 @@ async def _generate_reply(
     return cast(str, reply.text)
 
 
-async def _send_sms(user_id: str, message: str, utterance_id: str) -> None:
+async def _send_sms(
+    user_id: str,
+    message: str,
+    utterance_id: str,
+    in_reply_to_utterance_id: str | None = None,
+) -> None:
     url = get_sms_outbound_url()
     if not url:
         raise RuntimeError("SMS_OUTBOUND_URL is not set.")
@@ -129,12 +134,14 @@ async def _send_sms(user_id: str, message: str, utterance_id: str) -> None:
     headers = {"Authorization": auth_header} if auth_header else None
     timeout = get_sms_timeout_seconds()
     async with httpx.AsyncClient(timeout=timeout) as client:
-        payload = {
+        payload: dict[str, str] = {
             "participant_id": user_id,
             "message": message,
             "message_type": "sent",
             "utterance_id": utterance_id,
         }
+        if in_reply_to_utterance_id is not None:
+            payload["in_reply_to_utterance_id"] = in_reply_to_utterance_id
         response = await client.post(url, json=payload, headers=headers)
         response.raise_for_status()
 
@@ -254,6 +261,7 @@ async def _persist_and_send_bot_reply(
     stored_text: str,
     delivered_text: str,
     final_status: str,
+    in_reply_to_utterance_id: str | None = None,
     meta_updates: dict[str, Any] | None = None,
 ) -> None:
     bot_utterance = await session.get(Utterance, bot_utterance_id)
@@ -268,7 +276,7 @@ async def _persist_and_send_bot_reply(
     # Send SMS before committing so a delivery failure triggers rollback via
     # _mark_bot_utterance_failed, leaving the utterance in its original queued
     # state rather than persisting partial data.
-    await _send_sms(user_id, delivered_text, bot_utterance_id)
+    await _send_sms(user_id, delivered_text, bot_utterance_id, in_reply_to_utterance_id)
 
     await session.commit()
 
@@ -351,6 +359,7 @@ async def _process_queued_reply(
             stored_text=moderation_notice,
             delivered_text=moderation_notice,
             final_status=UTTERANCE_STATUS_MODERATED,
+            in_reply_to_utterance_id=user_utterance.id,
             meta_updates={
                 "texet_moderation_source": "user",
                 "texet_moderation_category": blocked_category,
@@ -420,6 +429,7 @@ async def _process_queued_reply(
             stored_text=reply_text,
             delivered_text=moderation_notice,
             final_status=UTTERANCE_STATUS_MODERATED,
+            in_reply_to_utterance_id=user_utterance.id,
             meta_updates={
                 "texet_moderation_source": "bot",
                 "texet_moderation_category": blocked_category,
@@ -436,6 +446,7 @@ async def _process_queued_reply(
         stored_text=reply_text,
         delivered_text=reply_text,
         final_status=UTTERANCE_STATUS_SENT,
+        in_reply_to_utterance_id=user_utterance.id,
     )
 
 
@@ -535,6 +546,7 @@ async def process_chat(
     return ChatQueuedResponse(
         conversation_id=conversation.id,
         reply_utterance_id=bot_utterance.id,
+        user_utterance_id=user_utterance.id,
         status=UTTERANCE_STATUS_QUEUED,
     )
 
@@ -593,4 +605,5 @@ async def process_response(
         status=chat_response.status,
         conversation_id=chat_response.conversation_id,
         mode=payload.mode,
+        user_utterance_id=chat_response.user_utterance_id,
     )

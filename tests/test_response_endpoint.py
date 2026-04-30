@@ -57,11 +57,21 @@ async def async_client(async_session: AsyncSession, monkeypatch: pytest.MonkeyPa
 
 
 @pytest.fixture()
-def sms_outbox(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, str]]:
-    outbox: list[dict[str, str]] = []
+def sms_outbox(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, str | None]]:
+    outbox: list[dict[str, str | None]] = []
 
-    async def _fake_send_sms(user_id: str, message: str, utterance_id: str) -> None:
-        outbox.append({"user_id": user_id, "message": message, "utterance_id": utterance_id})
+    async def _fake_send_sms(
+        user_id: str,
+        message: str,
+        utterance_id: str,
+        in_reply_to_utterance_id: str | None = None,
+    ) -> None:
+        outbox.append({
+            "user_id": user_id,
+            "message": message,
+            "utterance_id": utterance_id,
+            "in_reply_to_utterance_id": in_reply_to_utterance_id,
+        })
 
     monkeypatch.setattr(response_service, "_send_sms", _fake_send_sms)
     return outbox
@@ -208,6 +218,7 @@ async def test_response_accepts_max_length_input(
     body = response.json()
     assert sms_outbox[0]["user_id"] == "u-large"
     assert sms_outbox[0]["utterance_id"] == body["id"]
+    assert sms_outbox[0]["in_reply_to_utterance_id"] == body["user_utterance_id"]
 
 
 @pytest.mark.asyncio
@@ -230,6 +241,8 @@ async def test_response_success_persists(
     assert first_body["mode"] == "text"
     assert len(first_body["conversation_id"]) == 32
     assert len(first_body["id"]) == 32
+    assert len(first_body["user_utterance_id"]) == 32
+    assert first_body["user_utterance_id"] != first_body["id"]
 
     second_payload = {"user_id": "u1", "input": "again"}
     second = await async_client.post(
@@ -243,8 +256,8 @@ async def test_response_success_persists(
     assert second_body["conversation_id"] == first_body["conversation_id"]
 
     assert sms_outbox == [
-        {"user_id": "u1", "message": "reply:hello", "utterance_id": first_body["id"]},
-        {"user_id": "u1", "message": "reply:again", "utterance_id": second_body["id"]},
+        {"user_id": "u1", "message": "reply:hello", "utterance_id": first_body["id"], "in_reply_to_utterance_id": first_body["user_utterance_id"]},
+        {"user_id": "u1", "message": "reply:again", "utterance_id": second_body["id"], "in_reply_to_utterance_id": second_body["user_utterance_id"]},
     ]
     assert kani_stub[-1]["system_prompt"] == DEFAULT_SYSTEM_PROMPT
     assert kani_stub[0]["history"] == []
@@ -446,6 +459,7 @@ async def test_response_sends_moderation_email_when_blocked(
             "user_id": "u-mod",
             "message": "Your message was moderated due to violence content with score 0.91.",
             "utterance_id": body["id"],
+            "in_reply_to_utterance_id": body["user_utterance_id"],
         }
     ]
 
@@ -505,6 +519,7 @@ async def test_response_does_not_fail_if_moderation_email_errors(
             "user_id": "u-mod-mail-fail",
             "message": "Your message was moderated due to harassment content with score 0.73.",
             "utterance_id": body["id"],
+            "in_reply_to_utterance_id": body["user_utterance_id"],
         }
     ]
 
@@ -550,6 +565,7 @@ async def test_response_moderates_generated_reply_and_persists_raw_output(
             "user_id": "u-bot-mod",
             "message": moderation_notice,
             "utterance_id": body["id"],
+            "in_reply_to_utterance_id": body["user_utterance_id"],
         }
     ]
 
@@ -602,7 +618,12 @@ async def test_response_marks_failed_on_sms_error(
     async_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def _fail_send_sms(user_id: str, message: str, utterance_id: str) -> None:
+    async def _fail_send_sms(
+        user_id: str,
+        message: str,
+        utterance_id: str,
+        in_reply_to_utterance_id: str | None = None,
+    ) -> None:
         raise RuntimeError("sms gateway down")
 
     monkeypatch.setattr(response_service, "_send_sms", _fail_send_sms)
