@@ -21,6 +21,7 @@ from app.models.response import Conversation, Speaker, Utterance
 from app.response import service as response_service
 from app.response.crud import (
     DEFAULT_SYSTEM_PROMPT,
+    bot_speaker_id,
     create_utterance,
     get_or_create_bot_speaker,
     get_or_create_conversation,
@@ -693,3 +694,143 @@ async def test_response_different_day_creates_new_conversation(
     assert len(conversations) == 2
     day_ids = {c.day_identifier for c in conversations}
     assert day_ids == {1, 2}
+
+
+@pytest.mark.asyncio
+async def test_initial_message_persisted_as_bot_utterance(
+    async_client: AsyncClient,
+    async_session: AsyncSession,
+    sms_outbox: list[dict[str, str]],
+    kani_stub: list[dict[str, object]],
+) -> None:
+    response = await async_client.post(
+        "/response",
+        headers={"Authorization": f"Bearer {API_KEY}"},
+        json={
+            "user_id": "u-init",
+            "input": "Welcome to the study!",
+            "metadata": {"is_initial": True},
+        },
+    )
+    assert response.status_code == 202
+    body = response.json()
+    assert body["object"] == "response"
+    assert body["status"] == "recorded"
+    assert body["mode"] == "text"
+    assert len(body["id"]) == 32
+    assert len(body["conversation_id"]) == 32
+
+    assert sms_outbox == []
+    assert kani_stub == []
+
+    async_session.expire_all()
+    utterance = await async_session.get(Utterance, body["id"])
+    assert utterance is not None
+    assert utterance.text == "Welcome to the study!"
+    assert utterance.status == UTTERANCE_STATUS_SENT
+    assert utterance.speaker_id == bot_speaker_id("u-init")
+    assert utterance.reply_to_id is None
+    assert utterance.meta is not None
+    assert utterance.meta["texet_hub_initial"] is True
+
+
+@pytest.mark.asyncio
+async def test_initial_message_appears_as_assistant_in_chat_history(
+    async_client: AsyncClient,
+    async_session: AsyncSession,
+    sms_outbox: list[dict[str, str]],
+    kani_stub: list[dict[str, object]],
+) -> None:
+    await async_client.post(
+        "/response",
+        headers={"Authorization": f"Bearer {API_KEY}"},
+        json={
+            "user_id": "u-init-history",
+            "input": "Hello, welcome!",
+            "metadata": {"is_initial": True},
+        },
+    )
+
+    response = await async_client.post(
+        "/response",
+        headers={"Authorization": f"Bearer {API_KEY}"},
+        json={"user_id": "u-init-history", "input": "thanks"},
+    )
+    assert response.status_code == 202
+
+    assert len(kani_stub) == 1
+    history = kani_stub[0]["history"]
+    assert history == [("assistant", "Hello, welcome!")]
+
+
+@pytest.mark.asyncio
+async def test_initial_message_does_not_create_queued_bot_utterance(
+    async_client: AsyncClient,
+    async_session: AsyncSession,
+) -> None:
+    response = await async_client.post(
+        "/response",
+        headers={"Authorization": f"Bearer {API_KEY}"},
+        json={
+            "user_id": "u-init-count",
+            "input": "Initial greeting",
+            "metadata": {"is_initial": True},
+        },
+    )
+    assert response.status_code == 202
+
+    async_session.expire_all()
+    utterance_result = await async_session.execute(select(Utterance))
+    utterances = list(utterance_result.scalars().all())
+    assert len(utterances) == 1
+    assert utterances[0].status == UTTERANCE_STATUS_SENT
+
+
+@pytest.mark.asyncio
+async def test_initial_message_respects_day_identifier(
+    async_client: AsyncClient,
+    async_session: AsyncSession,
+) -> None:
+    response = await async_client.post(
+        "/response",
+        headers={"Authorization": f"Bearer {API_KEY}"},
+        json={
+            "user_id": "u-init-day",
+            "input": "Day 3 greeting",
+            "metadata": {"is_initial": True, "day_identifier": 3},
+        },
+    )
+    assert response.status_code == 202
+    conv_id = response.json()["conversation_id"]
+
+    async_session.expire_all()
+    conv = await async_session.get(Conversation, conv_id)
+    assert conv is not None
+    assert conv.day_identifier == 3
+
+
+@pytest.mark.asyncio
+async def test_normal_message_after_initial_uses_same_conversation(
+    async_client: AsyncClient,
+    async_session: AsyncSession,
+    sms_outbox: list[dict[str, str]],
+) -> None:
+    init_response = await async_client.post(
+        "/response",
+        headers={"Authorization": f"Bearer {API_KEY}"},
+        json={
+            "user_id": "u-init-conv",
+            "input": "Hi there!",
+            "metadata": {"is_initial": True},
+        },
+    )
+    assert init_response.status_code == 202
+    init_conv_id = init_response.json()["conversation_id"]
+
+    follow_response = await async_client.post(
+        "/response",
+        headers={"Authorization": f"Bearer {API_KEY}"},
+        json={"user_id": "u-init-conv", "input": "hello back"},
+    )
+    assert follow_response.status_code == 202
+    assert follow_response.json()["conversation_id"] == init_conv_id

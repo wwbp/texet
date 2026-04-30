@@ -52,7 +52,7 @@ qa-required: lint type audit ## Run all required quality checks (lint, types, se
 # ── Testing ────────────────────────────────────────────────────────────────
 
 test: check ## Run tests with coverage
-	docker compose run --rm --build api uv run pytest --cov
+	docker compose run --rm --build -v $(CURDIR):/app api uv run pytest --cov
 
 smoke: check ## End-to-end smoke test (also runs moderation smoke at the end)
 	bash scripts/e2e_smoke.sh

@@ -59,6 +59,6 @@ class ResponseQueuedResponse(BaseModel):
     )
     id: str
     object: Literal["response"]
-    status: Literal["queued"]
+    status: Literal["queued", "recorded"]
     conversation_id: str
     mode: ResponseMode

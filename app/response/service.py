@@ -539,11 +539,50 @@ async def process_chat(
     )
 
 
+async def _persist_initial_bot_message(
+    session: AsyncSession,
+    payload: ResponseRequest,
+) -> ResponseQueuedResponse:
+    metadata = payload.metadata or {}
+    day_identifier: int | None = None
+    raw = metadata.get("day_identifier")
+    if isinstance(raw, int):
+        day_identifier = raw
+
+    async with session.begin():
+        speaker = await get_or_create_speaker(session, payload.user_id, meta={"type": "user"})
+        bot = await get_or_create_bot_speaker(session, payload.user_id)
+
+        conversation = await get_or_create_conversation(
+            session, speaker.id, day_identifier=day_identifier
+        )
+
+        bot_utterance = await create_utterance(
+            session,
+            conversation.id,
+            bot.id,
+            payload.input,
+            meta=_merge_meta(payload.metadata, {"texet_hub_initial": True}),
+            status=UTTERANCE_STATUS_SENT,
+        )
+
+    return ResponseQueuedResponse(
+        id=bot_utterance.id,
+        object="response",
+        status="recorded",
+        conversation_id=conversation.id,
+        mode=payload.mode,
+    )
+
+
 async def process_response(
     session: AsyncSession,
     payload: ResponseRequest,
     background_tasks: BackgroundTasks,
 ) -> ResponseQueuedResponse:
+    if bool((payload.metadata or {}).get("is_initial")):
+        return await _persist_initial_bot_message(session, payload)
+
     chat_request = ChatRequest(user_id=payload.user_id, message=payload.input)
     chat_response = await process_chat(
         session, chat_request, background_tasks, meta=payload.metadata
