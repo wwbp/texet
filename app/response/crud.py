@@ -18,7 +18,7 @@ from app.config import (
 )
 from app.models.response import Conversation, DailyPrompt, Speaker, SystemPrompt, Utterance, WeeklySummary
 
-DEFAULT_SYSTEM_PROMPT = "you are a helful assistant."
+DEFAULT_SYSTEM_PROMPT = "you are a helpful assistant."
 
 
 def bot_speaker_id(user_id: str) -> str:

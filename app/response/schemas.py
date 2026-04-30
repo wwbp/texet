@@ -37,7 +37,7 @@ class ResponseRequest(BaseModel):
     )
 
     user_id: str = Field(min_length=1, max_length=128)
-    input: str
+    input: str = Field(min_length=1, max_length=10_000)
     mode: ResponseMode = "text"
     metadata: dict[str, Any] | None = None
 

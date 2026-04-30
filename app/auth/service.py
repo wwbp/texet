@@ -58,13 +58,6 @@ async def require_auth(
             await session.commit()
             return
 
-        has_keys = await session.execute(select(ApiKey.id).limit(1))
-        if has_keys.scalar_one_or_none() is None:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="API auth is not configured.",
-            )
-
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Unauthorized.",

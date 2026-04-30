@@ -1,7 +1,7 @@
 import asyncio
 import datetime
 import inspect
-from contextlib import suppress
+import logging
 from typing import Any, cast
 
 import httpx
@@ -62,6 +62,8 @@ from app.response.schemas import (
     ResponseRequest,
 )
 from app.response.utils import week_start_utc
+
+_logger = logging.getLogger(__name__)
 
 _USER_QUEUE_LOCKS: dict[str, asyncio.Lock] = {}
 _USER_QUEUE_LOCKS_GUARD = asyncio.Lock()
@@ -164,6 +166,8 @@ async def _moderate_text(text: str) -> tuple[bool, str, str, float]:
         await _close_async_openai_client(client)
 
     # OpenAI may return category scores as a typed object; normalize to a plain dict.
+    if not moderation_response.results:
+        return False, "", "", 0.0
     raw_category_scores = moderation_response.results[0].category_scores
     if raw_category_scores is None:
         return False, "", "", 0.0
@@ -261,12 +265,14 @@ async def _persist_and_send_bot_reply(
 
     bot_utterance.text = stored_text
     bot_utterance.error = None
+    bot_utterance.status = final_status
     bot_utterance.meta = _merge_meta(bot_utterance.meta, meta_updates)
-    await session.commit()
 
+    # Send SMS before committing so a delivery failure triggers rollback via
+    # _mark_bot_utterance_failed, leaving the utterance in its original queued
+    # state rather than persisting partial data.
     await _send_sms(user_id, delivered_text, bot_utterance_id)
 
-    bot_utterance.status = final_status
     await session.commit()
 
 
@@ -318,13 +324,19 @@ async def _process_queued_reply(
             user_id=user_id,
             up_to_timestamp=user_utterance.timestamp,
         )
-        with suppress(Exception):
+        try:
             await _send_moderation_email(
                 user_id=user_id,
                 utterance_id=user_utterance.id,
                 blocked_category=blocked_category,
                 blocked_score=blocked_score,
                 recent_chat_history=blocked_history[-5:],
+            )
+        except Exception:
+            _logger.warning(
+                "Moderation email failed for utterance %s",
+                user_utterance.id,
+                exc_info=True,
             )
         user_utterance.status = UTTERANCE_STATUS_MODERATED
         user_utterance.meta = _merge_meta(

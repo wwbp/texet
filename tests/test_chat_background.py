@@ -34,9 +34,13 @@ def _sessionmaker_from(session: AsyncSession) -> async_sessionmaker[AsyncSession
 def _stub_moderation_openai(
     monkeypatch: pytest.MonkeyPatch,
     category_scores: dict[str, float] | None,
+    results_list: list[object] | None = None,
 ) -> dict[str, object]:
     captured: dict[str, object] = {}
-    response = SimpleNamespace(results=[SimpleNamespace(category_scores=category_scores)])
+    if results_list is not None:
+        response = SimpleNamespace(results=results_list)
+    else:
+        response = SimpleNamespace(results=[SimpleNamespace(category_scores=category_scores)])
 
     class _FakeOpenAI:
         def __init__(self, *, api_key: str) -> None:
@@ -518,3 +522,67 @@ async def test_moderate_message_requires_text(monkeypatch: pytest.MonkeyPatch) -
 
     with pytest.raises(RuntimeError, match="Utterance text is not set."):
         await response_service._moderate_message(utterance)
+
+
+@pytest.mark.asyncio
+async def test_run_deferred_reply_sms_failure_does_not_commit_text(
+    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """SMS failure must leave the bot utterance with text=None, not partially committed."""
+
+    async def _allow_moderation(_utterance: Utterance) -> tuple[bool, str, str, float]:
+        return False, "", "", 0.0
+
+    async def _allow_text_moderation(_text: str) -> tuple[bool, str, str, float]:
+        return False, "", "", 0.0
+
+    async def _fake_generate_reply(*_args: object, **_kwargs: object) -> str:
+        return "the generated reply"
+
+    async def _fail_send_sms(user_id: str, message: str, utterance_id: str) -> None:
+        raise RuntimeError("sms gateway down")
+
+    monkeypatch.setattr(response_service, "_moderate_message", _allow_moderation)
+    monkeypatch.setattr(response_service, "_moderate_text", _allow_text_moderation)
+    monkeypatch.setattr(response_service, "_generate_reply", _fake_generate_reply)
+    monkeypatch.setattr(response_service, "_send_sms", _fail_send_sms)
+
+    async with async_session.begin():
+        speaker = await get_or_create_speaker(async_session, "u-sms-fail", meta={"type": "user"})
+        bot = await get_or_create_bot_speaker(async_session, "u-sms-fail")
+        conversation = await get_or_create_conversation(async_session, speaker.id)
+        user_utterance = await create_utterance(
+            async_session, conversation.id, speaker.id, "hi"
+        )
+        bot_utterance = await create_queued_utterance(
+            async_session, conversation.id, bot.id, reply_to_id=user_utterance.id
+        )
+        bot_utterance_id = bot_utterance.id
+
+    sessionmaker = _sessionmaker_from(async_session)
+    await response_service._run_deferred_reply(
+        "u-sms-fail", user_utterance.id, bot_utterance_id, sessionmaker
+    )
+
+    async_session.expire_all()
+    refreshed = await async_session.get(Utterance, bot_utterance_id)
+    assert refreshed is not None
+    assert refreshed.status == UTTERANCE_STATUS_FAILED
+    assert refreshed.error is not None and "sms gateway down" in refreshed.error
+    assert refreshed.text is None  # rollback must have cleared the generated text
+
+
+@pytest.mark.asyncio
+async def test_moderate_text_empty_results_returns_not_blocked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # OpenAI occasionally returns an empty results list; must not IndexError.
+    _stub_moderation_openai(monkeypatch, category_scores=None, results_list=[])
+    utterance = Utterance(conversation_id="c-mod-7", speaker_id="u-mod-7", text="sample")
+
+    blocked, reason, category, score = await response_service._moderate_message(utterance)
+
+    assert blocked is False
+    assert reason == ""
+    assert category == ""
+    assert score == 0.0

@@ -172,22 +172,27 @@ async def test_response_rejects_unknown_mode(async_client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_response_allows_empty_input(
-    async_client: AsyncClient,
-    sms_outbox: list[dict[str, str]],
-) -> None:
+async def test_response_rejects_empty_input(async_client: AsyncClient) -> None:
     response = await async_client.post(
         "/response",
         headers={"Authorization": f"Bearer {API_KEY}"},
         json={"user_id": "u-empty", "input": ""},
     )
-    assert response.status_code == 202
-    body = response.json()
-    assert sms_outbox == [{"user_id": "u-empty", "message": "reply:", "utterance_id": body["id"]}]
+    assert response.status_code == 422
 
 
 @pytest.mark.asyncio
-async def test_response_allows_large_input(
+async def test_response_rejects_oversized_input(async_client: AsyncClient) -> None:
+    response = await async_client.post(
+        "/response",
+        headers={"Authorization": f"Bearer {API_KEY}"},
+        json={"user_id": "u-oversized", "input": "a" * 10_001},
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_response_accepts_max_length_input(
     async_client: AsyncClient,
     sms_outbox: list[dict[str, str]],
 ) -> None:
@@ -201,8 +206,6 @@ async def test_response_allows_large_input(
     assert len(sms_outbox) == 1
     body = response.json()
     assert sms_outbox[0]["user_id"] == "u-large"
-    assert sms_outbox[0]["message"].startswith("reply:")
-    assert len(sms_outbox[0]["message"]) == len(message) + 6
     assert sms_outbox[0]["utterance_id"] == body["id"]
 
 
@@ -622,6 +625,9 @@ async def test_response_marks_failed_on_sms_error(
     bot_utterance = result.scalar_one()
     assert bot_utterance.status == UTTERANCE_STATUS_FAILED
     assert bot_utterance.error is not None
+    # Text must not be committed when SMS delivery fails — the DB row should
+    # reflect only the failed state, not partial generation output.
+    assert bot_utterance.text is None
 
 
 @pytest.mark.asyncio
