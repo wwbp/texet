@@ -56,26 +56,20 @@ async def test_pipeline_injects_summary_into_system_prompt(
     prev_week_start = current_week_start - datetime.timedelta(days=7)
 
     async with async_session.begin():
-        speaker = await get_or_create_speaker(
-            async_session, "u-pipe-sum", meta={"type": "user"}
-        )
+        speaker = await get_or_create_speaker(async_session, "u-pipe-sum", meta={"type": "user"})
         bot = await get_or_create_bot_speaker(async_session, "u-pipe-sum")
         conversation = await get_or_create_conversation(async_session, speaker.id)
         await upsert_weekly_summary(
             async_session, "u-pipe-sum", prev_week_start, "User discussed their goals."
         )
-        user_utt = await create_utterance(
-            async_session, conversation.id, speaker.id, "hello"
-        )
+        user_utt = await create_utterance(async_session, conversation.id, speaker.id, "hello")
         bot_utt = await create_queued_utterance(
             async_session, conversation.id, bot.id, reply_to_id=user_utt.id
         )
         bot_utt_id = bot_utt.id
 
     sessionmaker = _sessionmaker_from(async_session)
-    await response_service._run_deferred_reply(
-        "u-pipe-sum", user_utt.id, bot_utt_id, sessionmaker
-    )
+    await response_service._run_deferred_reply("u-pipe-sum", user_utt.id, bot_utt_id, sessionmaker)
 
     system_prompt = captured["system_prompt"]
     assert isinstance(system_prompt, str)
@@ -108,14 +102,10 @@ async def test_pipeline_uses_base_prompt_when_no_summary(
     monkeypatch.setattr(response_service, "_send_sms", _fake_send_sms)
 
     async with async_session.begin():
-        speaker = await get_or_create_speaker(
-            async_session, "u-pipe-nosum", meta={"type": "user"}
-        )
+        speaker = await get_or_create_speaker(async_session, "u-pipe-nosum", meta={"type": "user"})
         bot = await get_or_create_bot_speaker(async_session, "u-pipe-nosum")
         conversation = await get_or_create_conversation(async_session, speaker.id)
-        user_utt = await create_utterance(
-            async_session, conversation.id, speaker.id, "hello"
-        )
+        user_utt = await create_utterance(async_session, conversation.id, speaker.id, "hello")
         bot_utt = await create_queued_utterance(
             async_session, conversation.id, bot.id, reply_to_id=user_utt.id
         )
@@ -169,9 +159,7 @@ async def test_pipeline_chat_history_limited_to_current_week(
     )
 
     async with async_session.begin():
-        speaker = await get_or_create_speaker(
-            async_session, "u-pipe-hist", meta={"type": "user"}
-        )
+        speaker = await get_or_create_speaker(async_session, "u-pipe-hist", meta={"type": "user"})
         bot = await get_or_create_bot_speaker(async_session, "u-pipe-hist")
         conversation = await get_or_create_conversation(async_session, speaker.id)
 

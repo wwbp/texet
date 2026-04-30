@@ -1,7 +1,7 @@
 import asyncio
 import datetime
 import inspect
-from contextlib import suppress
+import logging
 from typing import Any, cast
 
 import httpx
@@ -63,6 +63,8 @@ from app.response.schemas import (
 )
 from app.response.utils import week_start_utc
 
+_logger = logging.getLogger(__name__)
+
 _USER_QUEUE_LOCKS: dict[str, asyncio.Lock] = {}
 _USER_QUEUE_LOCKS_GUARD = asyncio.Lock()
 
@@ -82,10 +84,7 @@ def _merge_meta(
 
 def _moderation_notice(source: str, category: str, score: float) -> str:
     if source == "bot":
-        return (
-            f"A generated reply was moderated due to {category} content "
-            f"with score {score:.2f}."
-        )
+        return f"A generated reply was moderated due to {category} content with score {score:.2f}."
     return f"Your message was moderated due to {category} content with score {score:.2f}."
 
 
@@ -122,7 +121,12 @@ async def _generate_reply(
     return cast(str, reply.text)
 
 
-async def _send_sms(user_id: str, message: str, utterance_id: str) -> None:
+async def _send_sms(
+    user_id: str,
+    message: str,
+    utterance_id: str,
+    in_reply_to_utterance_id: str | None = None,
+) -> None:
     url = get_sms_outbound_url()
     if not url:
         raise RuntimeError("SMS_OUTBOUND_URL is not set.")
@@ -130,12 +134,14 @@ async def _send_sms(user_id: str, message: str, utterance_id: str) -> None:
     headers = {"Authorization": auth_header} if auth_header else None
     timeout = get_sms_timeout_seconds()
     async with httpx.AsyncClient(timeout=timeout) as client:
-        payload = {
+        payload: dict[str, str] = {
             "participant_id": user_id,
             "message": message,
             "message_type": "sent",
             "utterance_id": utterance_id,
         }
+        if in_reply_to_utterance_id is not None:
+            payload["in_reply_to_utterance_id"] = in_reply_to_utterance_id
         response = await client.post(url, json=payload, headers=headers)
         response.raise_for_status()
 
@@ -164,6 +170,8 @@ async def _moderate_text(text: str) -> tuple[bool, str, str, float]:
         await _close_async_openai_client(client)
 
     # OpenAI may return category scores as a typed object; normalize to a plain dict.
+    if not moderation_response.results:
+        return False, "", "", 0.0
     raw_category_scores = moderation_response.results[0].category_scores
     if raw_category_scores is None:
         return False, "", "", 0.0
@@ -209,7 +217,7 @@ async def _send_moderation_email(
 
     conf = ConnectionConfig(
         MAIL_USERNAME=mail_username,
-        MAIL_PASSWORD=mail_password,
+        MAIL_PASSWORD=mail_password,  # type: ignore[arg-type]
         MAIL_FROM=mail_from,
         MAIL_PORT=get_mail_port(),
         MAIL_SERVER=mail_server,
@@ -239,7 +247,7 @@ async def _send_moderation_email(
 
     message = MessageSchema(
         subject=f"[texet] moderation blocked user={user_id} category={blocked_category}",
-        recipients=recipients,
+        recipients=recipients,  # type: ignore[arg-type]
         body=body,
         subtype=MessageType.plain,
     )
@@ -253,6 +261,7 @@ async def _persist_and_send_bot_reply(
     stored_text: str,
     delivered_text: str,
     final_status: str,
+    in_reply_to_utterance_id: str | None = None,
     meta_updates: dict[str, Any] | None = None,
 ) -> None:
     bot_utterance = await session.get(Utterance, bot_utterance_id)
@@ -261,12 +270,14 @@ async def _persist_and_send_bot_reply(
 
     bot_utterance.text = stored_text
     bot_utterance.error = None
-    bot_utterance.meta = _merge_meta(bot_utterance.meta, meta_updates)
-    await session.commit()
-
-    await _send_sms(user_id, delivered_text, bot_utterance_id)
-
     bot_utterance.status = final_status
+    bot_utterance.meta = _merge_meta(bot_utterance.meta, meta_updates)
+
+    # Send SMS before committing so a delivery failure triggers rollback via
+    # _mark_bot_utterance_failed, leaving the utterance in its original queued
+    # state rather than persisting partial data.
+    await _send_sms(user_id, delivered_text, bot_utterance_id, in_reply_to_utterance_id)
+
     await session.commit()
 
 
@@ -318,13 +329,19 @@ async def _process_queued_reply(
             user_id=user_id,
             up_to_timestamp=user_utterance.timestamp,
         )
-        with suppress(Exception):
+        try:
             await _send_moderation_email(
                 user_id=user_id,
                 utterance_id=user_utterance.id,
                 blocked_category=blocked_category,
                 blocked_score=blocked_score,
                 recent_chat_history=blocked_history[-5:],
+            )
+        except Exception:
+            _logger.warning(
+                "Moderation email failed for utterance %s",
+                user_utterance.id,
+                exc_info=True,
             )
         user_utterance.status = UTTERANCE_STATUS_MODERATED
         user_utterance.meta = _merge_meta(
@@ -342,6 +359,7 @@ async def _process_queued_reply(
             stored_text=moderation_notice,
             delivered_text=moderation_notice,
             final_status=UTTERANCE_STATUS_MODERATED,
+            in_reply_to_utterance_id=user_utterance.id,
             meta_updates={
                 "texet_moderation_source": "user",
                 "texet_moderation_category": blocked_category,
@@ -369,7 +387,9 @@ async def _process_queued_reply(
         if isinstance(raw, int):
             day_identifier = raw
 
-    daily_prompt = await get_daily_prompt(session, day_identifier) if day_identifier is not None else None
+    daily_prompt = (
+        await get_daily_prompt(session, day_identifier) if day_identifier is not None else None
+    )
     daily_content = daily_prompt.content if daily_prompt else None
 
     system_prompt = compose_instruction_prompt(
@@ -409,6 +429,7 @@ async def _process_queued_reply(
             stored_text=reply_text,
             delivered_text=moderation_notice,
             final_status=UTTERANCE_STATUS_MODERATED,
+            in_reply_to_utterance_id=user_utterance.id,
             meta_updates={
                 "texet_moderation_source": "bot",
                 "texet_moderation_category": blocked_category,
@@ -425,6 +446,7 @@ async def _process_queued_reply(
         stored_text=reply_text,
         delivered_text=reply_text,
         final_status=UTTERANCE_STATUS_SENT,
+        in_reply_to_utterance_id=user_utterance.id,
     )
 
 
@@ -524,7 +546,44 @@ async def process_chat(
     return ChatQueuedResponse(
         conversation_id=conversation.id,
         reply_utterance_id=bot_utterance.id,
+        user_utterance_id=user_utterance.id,
         status=UTTERANCE_STATUS_QUEUED,
+    )
+
+
+async def _persist_initial_bot_message(
+    session: AsyncSession,
+    payload: ResponseRequest,
+) -> ResponseQueuedResponse:
+    metadata = payload.metadata or {}
+    day_identifier: int | None = None
+    raw = metadata.get("day_identifier")
+    if isinstance(raw, int):
+        day_identifier = raw
+
+    async with session.begin():
+        speaker = await get_or_create_speaker(session, payload.user_id, meta={"type": "user"})
+        bot = await get_or_create_bot_speaker(session, payload.user_id)
+
+        conversation = await get_or_create_conversation(
+            session, speaker.id, day_identifier=day_identifier
+        )
+
+        bot_utterance = await create_utterance(
+            session,
+            conversation.id,
+            bot.id,
+            payload.input,
+            meta=_merge_meta(payload.metadata, {"texet_hub_initial": True}),
+            status=UTTERANCE_STATUS_SENT,
+        )
+
+    return ResponseQueuedResponse(
+        id=bot_utterance.id,
+        object="response",
+        status="recorded",
+        conversation_id=conversation.id,
+        mode=payload.mode,
     )
 
 
@@ -533,6 +592,9 @@ async def process_response(
     payload: ResponseRequest,
     background_tasks: BackgroundTasks,
 ) -> ResponseQueuedResponse:
+    if bool((payload.metadata or {}).get("is_initial")):
+        return await _persist_initial_bot_message(session, payload)
+
     chat_request = ChatRequest(user_id=payload.user_id, message=payload.input)
     chat_response = await process_chat(
         session, chat_request, background_tasks, meta=payload.metadata
@@ -543,4 +605,5 @@ async def process_response(
         status=chat_response.status,
         conversation_id=chat_response.conversation_id,
         mode=payload.mode,
+        user_utterance_id=chat_response.user_utterance_id,
     )

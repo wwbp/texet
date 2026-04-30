@@ -16,9 +16,16 @@ from app.config import (
     UTTERANCE_STATUS_RECEIVED,
     UTTERANCE_STATUSES,
 )
-from app.models.response import Conversation, DailyPrompt, Speaker, SystemPrompt, Utterance, WeeklySummary
+from app.models.response import (
+    Conversation,
+    DailyPrompt,
+    Speaker,
+    SystemPrompt,
+    Utterance,
+    WeeklySummary,
+)
 
-DEFAULT_SYSTEM_PROMPT = "you are a helful assistant."
+DEFAULT_SYSTEM_PROMPT = "you are a helpful assistant."
 
 
 def bot_speaker_id(user_id: str) -> str:
@@ -161,9 +168,7 @@ async def build_chat_history(
     if since_timestamp is not None:
         conditions.append(Utterance.timestamp >= since_timestamp)
     result = await session.execute(
-        select(Utterance)
-        .where(*conditions)
-        .order_by(Utterance.timestamp)
+        select(Utterance).where(*conditions).order_by(Utterance.timestamp)
     )
     utterances = result.scalars().all()
 

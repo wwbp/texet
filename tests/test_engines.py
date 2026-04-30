@@ -12,6 +12,7 @@ from app.engines.factory import create_engine
 # BedrockEngine unit tests
 # ---------------------------------------------------------------------------
 
+
 def _make_bedrock_response(text: str) -> dict:
     return {"output": {"message": {"content": [{"text": text}]}}}
 
@@ -117,6 +118,7 @@ async def test_bedrock_predict_no_system_prompt(bedrock_engine: BedrockEngine) -
 # ---------------------------------------------------------------------------
 # Engine factory tests
 # ---------------------------------------------------------------------------
+
 
 def test_factory_openai(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")

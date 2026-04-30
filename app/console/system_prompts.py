@@ -10,8 +10,7 @@ from app.db import get_async_session
 from app.models.response import SystemPrompt
 
 _INPUT_STYLE = (
-    "width:100%;padding:6px;border:1px solid var(--border);"
-    "border-radius:8px;font-size:13px;"
+    "width:100%;padding:6px;border:1px solid var(--border);border-radius:8px;font-size:13px;"
 )
 
 _PROVIDER_OPTIONS = [

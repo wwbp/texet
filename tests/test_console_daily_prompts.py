@@ -71,9 +71,7 @@ async def test_console_daily_prompts_crud(
     assert create.status_code == 200
     assert "Walk 10 minutes." in create.text
 
-    result = await async_session.execute(
-        select(DailyPrompt).where(DailyPrompt.day_identifier == 3)
-    )
+    result = await async_session.execute(select(DailyPrompt).where(DailyPrompt.day_identifier == 3))
     created = result.scalar_one()
     assert created.content == "Walk 10 minutes."
     prompt_id = created.id

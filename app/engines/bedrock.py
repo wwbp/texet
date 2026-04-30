@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import asyncio
 
-import boto3
-from botocore.exceptions import ClientError
+import boto3  # type: ignore[import-untyped]
+from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 from kani.engines.base import BaseCompletion, BaseEngine  # type: ignore[import-untyped]
 from kani.models import ChatMessage, ChatRole  # type: ignore[import-untyped]
 
@@ -92,9 +92,7 @@ class BedrockEngine(BaseEngine):
                 conversation.append({"role": role, "content": [{"text": content}]})
 
         loop = asyncio.get_running_loop()
-        response = await loop.run_in_executor(
-            None, self._call_bedrock, system_blocks, conversation
-        )
+        response = await loop.run_in_executor(None, self._call_bedrock, system_blocks, conversation)
         text = response["output"]["message"]["content"][0]["text"].strip()
         return BedrockCompletion(ChatMessage(role=ChatRole.ASSISTANT, content=text))
 
@@ -110,7 +108,7 @@ class BedrockEngine(BaseEngine):
         if system_blocks:
             converse_kwargs["system"] = system_blocks
         try:
-            return self.client.converse(**converse_kwargs)  # type: ignore[return-value]
+            return self.client.converse(**converse_kwargs)  # type: ignore[no-any-return]
         except ClientError as exc:
             raise RuntimeError(f"Bedrock API call failed: {exc}") from exc
 

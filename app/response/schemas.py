@@ -14,6 +14,7 @@ class ChatQueuedResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     conversation_id: str
     reply_utterance_id: str
+    user_utterance_id: str
     status: Literal["queued"]
 
 
@@ -37,7 +38,7 @@ class ResponseRequest(BaseModel):
     )
 
     user_id: str = Field(min_length=1, max_length=128)
-    input: str
+    input: str = Field(min_length=1, max_length=10_000)
     mode: ResponseMode = "text"
     metadata: dict[str, Any] | None = None
 
@@ -59,6 +60,7 @@ class ResponseQueuedResponse(BaseModel):
     )
     id: str
     object: Literal["response"]
-    status: Literal["queued"]
+    status: Literal["queued", "recorded"]
     conversation_id: str
     mode: ResponseMode
+    user_utterance_id: str | None = None

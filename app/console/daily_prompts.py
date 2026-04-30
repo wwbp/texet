@@ -11,8 +11,7 @@ from app.db import get_async_session
 from app.models.response import DailyPrompt
 
 _INPUT_STYLE = (
-    "width:100%;padding:6px;border:1px solid var(--border);"
-    "border-radius:8px;font-size:13px;"
+    "width:100%;padding:6px;border:1px solid var(--border);border-radius:8px;font-size:13px;"
 )
 
 
@@ -183,9 +182,7 @@ def _render_daily_prompts_page(
 
 
 async def _list_prompts(session: AsyncSession) -> list[DailyPrompt]:
-    result = await session.execute(
-        select(DailyPrompt).order_by(DailyPrompt.day_identifier.asc())
-    )
+    result = await session.execute(select(DailyPrompt).order_by(DailyPrompt.day_identifier.asc()))
     return list(result.scalars().all())
 
 

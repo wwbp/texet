@@ -9,7 +9,11 @@ from app.main import app
 
 
 @pytest.mark.asyncio
-async def test_auth_requires_configured_key(async_session: AsyncSession) -> None:
+async def test_auth_unknown_key_returns_401_regardless_of_key_table_state(
+    async_session: AsyncSession,
+) -> None:
+    # When no API keys are configured at all, must still return 401 (not 500)
+    # so callers cannot infer whether the system is initialised.
     async def _override_dependency() -> AsyncGenerator[AsyncSession, None]:
         yield async_session
 
@@ -23,5 +27,4 @@ async def test_auth_requires_configured_key(async_session: AsyncSession) -> None
         )
     app.dependency_overrides.clear()
 
-    assert response.status_code == 500
-    assert response.json()["detail"] == "API auth is not configured."
+    assert response.status_code == 401

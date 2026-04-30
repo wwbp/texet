@@ -3,6 +3,8 @@
 help:
 	@awk 'BEGIN{FS=":.*##"} /^[a-zA-Z_-]+:.*##/{printf "%-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
+# ── Stack ──────────────────────────────────────────────────────────────────
+
 start: ## Build and start the stack
 	docker compose up --build -d
 
@@ -19,37 +21,44 @@ check: ## Ensure the database container is running
 		exit 1; \
 	}
 
-test: check ## Run tests with coverage
-	docker compose run --rm --build api uv run pytest --cov
-
-lint: ## Lint (no fixes)
-	docker compose run --rm --build api uv run ruff check .
-
-fix: ## Auto-fix lint and format
-	docker compose run --rm --build -v $(CURDIR):/app api uv run ruff check --fix .
-	docker compose run --rm --build -v $(CURDIR):/app api uv run ruff format .
-
-type: ## Type check
-	docker compose run --rm --build api uv run mypy
-
-audit: ## Dependency audit
-	docker compose run --rm --build api uv run pip-audit
+# ── Development ────────────────────────────────────────────────────────────
 
 migration: check ## Create a new migration (name=...)
 	@if [ -z "$(name)" ]; then echo "Usage: make migration name=..."; exit 1; fi
 	docker compose run --rm --build -v $(CURDIR):/app api alembic revision --autogenerate -m "$(name)"
 
-migrate: check ## Apply migrations
+migrate: check ## Apply pending migrations
 	docker compose run --rm --build -v $(CURDIR):/app api alembic upgrade head
-
-smoke: check ## Run end-to-end smoke test
-	bash scripts/e2e_smoke.sh
-
-load: ## Run Locust load test UI (HOST=http://localhost:8000, requires TEXET_API_KEY)
-	uv run locust --host $${HOST:-http://localhost:8000}
-
-smoke-moderation: ## Run live moderation smoke test (requires OPENAI_API_KEY)
-	docker compose run --rm --build api env PYTHONPATH=/app uv run python scripts/moderation_smoke.py
 
 api-key: check ## Create an API key
 	docker compose run --rm --build api uv run python -m app.auth.cli
+
+# ── Quality ────────────────────────────────────────────────────────────────
+
+lint: ## Lint (no fixes)
+	docker compose run --rm --build api uv run ruff check .
+
+fix: ## Auto-fix lint and format
+	docker compose run --rm --build -v $(CURDIR):/app api sh -c 'uv run ruff check --fix . && uv run ruff format .'
+
+type: ## Type check
+	docker compose run --rm --build api uv run mypy
+
+audit: ## Dependency security audit
+	docker compose run --rm --build api uv run pip-audit
+
+qa-required: lint type audit ## Run all required quality checks (lint, types, security)
+
+# ── Testing ────────────────────────────────────────────────────────────────
+
+test: check ## Run tests with coverage
+	docker compose run --rm --build -v $(CURDIR):/app api uv run pytest --cov
+
+smoke: check ## End-to-end smoke test (also runs moderation smoke at the end)
+	bash scripts/e2e_smoke.sh
+
+smoke-moderation: ## Live moderation smoke test only (requires OPENAI_API_KEY)
+	docker compose run --rm --build api env PYTHONPATH=/app uv run python scripts/moderation_smoke.py
+
+load: ## Locust load test UI (HOST=http://localhost:8000, requires TEXET_API_KEY)
+	uv run locust --host $${HOST:-http://localhost:8000}
