@@ -1,4 +1,5 @@
 import datetime
+import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -22,18 +23,15 @@ from app.response.schemas import ResponseQueuedResponse, ResponseRequest
 from app.scheduler import start_scheduler, stop_scheduler
 
 
-class _ForwardedProtoMiddleware:
-    """Patch scope scheme from X-Forwarded-Proto so sqladmin generates https:// asset URLs."""
+class _ForceHTTPSMiddleware:
+    """Force https scheme so sqladmin generates https:// asset URLs when behind a TLS proxy."""
 
     def __init__(self, app: object) -> None:
         self.app = app
 
     async def __call__(self, scope: dict, receive: object, send: object) -> None:
         if scope.get("type") in ("http", "websocket"):
-            for name, value in scope.get("headers", []):
-                if name == b"x-forwarded-proto" and value == b"https":
-                    scope = {**scope, "scheme": "https"}
-                    break
+            scope = {**scope, "scheme": "https"}
         await self.app(scope, receive, send)  # type: ignore[operator]
 
 
@@ -79,7 +77,8 @@ def openapi_schema_for_docs() -> dict[str, object]:
 
 app.openapi = openapi_schema_for_docs  # type: ignore[method-assign]
 
-app.add_middleware(_ForwardedProtoMiddleware)
+if os.getenv("FORCE_HTTPS") == "true":
+    app.add_middleware(_ForceHTTPSMiddleware)
 
 if admin_enabled():
     admin_secret = get_admin_secret_key()
