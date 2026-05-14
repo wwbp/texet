@@ -202,6 +202,7 @@ def _build_moderation_email(
     conversation_id: str,
     speaker_id: str,
     utterance_text: str,
+    utterance_timestamp: datetime.datetime,
     blocked_category: str,
     blocked_score: float,
     recent_chat_history: list[ChatMessage],
@@ -220,6 +221,8 @@ def _build_moderation_email(
         return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
     utterance_html = _esc(utterance_text)
+    ts = utterance_timestamp
+    timestamp_str = f"{ts.strftime('%b')} {ts.day}, {ts.year} {ts.hour:02d}:{ts.minute:02d} {ts.strftime('%Z') or 'UTC'}"
     admin_prefix = f"{admin_base_url.rstrip('/')}/console/admin" if admin_base_url else None
 
     links_html = ""
@@ -267,7 +270,8 @@ def _build_moderation_email(
 
       <!-- flagged message -->
       <tr><td style="padding-bottom:16px;">
-        <p style="margin:0 0 8px;font-size:13px;font-weight:600;color:#555;text-transform:uppercase;letter-spacing:.05em;">Flagged message</p>
+        <p style="margin:0 0 4px;font-size:13px;font-weight:600;color:#555;text-transform:uppercase;letter-spacing:.05em;">Flagged message</p>
+        <p style="margin:0 0 8px;font-size:12px;color:#999;">{timestamp_str}</p>
         <div style="background:#fef9f0;border-left:4px solid {score_color};padding:12px 16px;font-size:15px;color:#222;line-height:1.5;border-radius:0 4px 4px 0;">{utterance_html}</div>
       </td></tr>
 
@@ -300,6 +304,7 @@ async def _send_moderation_email(
     conversation_id: str,
     speaker_id: str,
     utterance_text: str,
+    utterance_timestamp: datetime.datetime,
     blocked_category: str,
     blocked_score: float,
     recent_chat_history: list[ChatMessage],
@@ -335,6 +340,7 @@ async def _send_moderation_email(
         conversation_id=conversation_id,
         speaker_id=speaker_id,
         utterance_text=utterance_text,
+        utterance_timestamp=utterance_timestamp,
         blocked_category=blocked_category,
         blocked_score=blocked_score,
         recent_chat_history=recent_chat_history,
@@ -432,6 +438,7 @@ async def _process_queued_reply(
                 conversation_id=user_utterance.conversation_id,
                 speaker_id=user_utterance.speaker_id,
                 utterance_text=user_utterance.text,
+                utterance_timestamp=user_utterance.timestamp,
                 blocked_category=blocked_category,
                 blocked_score=blocked_score,
                 recent_chat_history=blocked_history[-5:],
