@@ -529,7 +529,7 @@ async def test_response_does_not_fail_if_moderation_email_errors(
     assert sms_outbox == [
         {
             "user_id": "u-mod-mail-fail",
-            "message": "Your message was moderated due to harassment content with score 0.73.",
+            "message": "I can't personally help with that, but your safety matters, and support is available. Call the crisis line at 988 to talk to someone.",
             "utterance_id": body["id"],
             "in_reply_to_utterance_id": body["user_utterance_id"],
         }
