@@ -1,4 +1,6 @@
 """Unit tests for _build_moderation_email — no DB, no mail server needed."""
+import datetime
+
 from kani import ChatMessage, ChatRole
 
 from app.response.service import _build_moderation_email
@@ -8,6 +10,8 @@ from app.response.service import _build_moderation_email
 # ---------------------------------------------------------------------------
 
 _BASE_URL = "https://texet.example.com"
+_EST = datetime.timezone(datetime.timedelta(hours=-5), name="EST")
+_DEFAULT_TIMESTAMP = datetime.datetime(2026, 5, 14, 15, 42, tzinfo=_EST)
 
 
 def _build(
@@ -17,6 +21,7 @@ def _build(
     conversation_id: str = "conv-xyz",
     speaker_id: str = "spk-456",
     utterance_text: str = "I want to hurt myself",
+    utterance_timestamp: datetime.datetime = _DEFAULT_TIMESTAMP,
     blocked_category: str = "self-harm/intent",
     blocked_score: float = 0.82,
     history: list[ChatMessage] | None = None,
@@ -28,6 +33,7 @@ def _build(
         conversation_id=conversation_id,
         speaker_id=speaker_id,
         utterance_text=utterance_text,
+        utterance_timestamp=utterance_timestamp,
         blocked_category=blocked_category,
         blocked_score=blocked_score,
         recent_chat_history=history or [],
@@ -259,3 +265,38 @@ def test_body_is_html() -> None:
 def test_alert_header_present() -> None:
     _, body = _build()
     assert "MODERATION ALERT" in body
+
+
+# ---------------------------------------------------------------------------
+# Timestamp
+# ---------------------------------------------------------------------------
+
+
+def test_timestamp_date_in_body() -> None:
+    ts = datetime.datetime(2026, 5, 14, 15, 42, tzinfo=_EST)
+    _, body = _build(utterance_timestamp=ts)
+    assert "May 14, 2026" in body
+
+
+def test_timestamp_time_in_body() -> None:
+    ts = datetime.datetime(2026, 5, 14, 15, 42, tzinfo=_EST)
+    _, body = _build(utterance_timestamp=ts)
+    assert "15:42" in body
+
+
+def test_timestamp_timezone_in_body() -> None:
+    ts = datetime.datetime(2026, 5, 14, 15, 42, tzinfo=_EST)
+    _, body = _build(utterance_timestamp=ts)
+    assert "EST" in body
+
+
+def test_timestamp_appears_before_flagged_message_text() -> None:
+    ts = datetime.datetime(2026, 5, 14, 15, 42, tzinfo=_EST)
+    _, body = _build(utterance_timestamp=ts, utterance_text="the flagged text")
+    assert body.index("May 14, 2026") < body.index("the flagged text")
+
+
+def test_timestamp_utc_fallback_when_no_tzname() -> None:
+    ts = datetime.datetime(2026, 5, 14, 9, 0, tzinfo=datetime.timezone.utc)
+    _, body = _build(utterance_timestamp=ts)
+    assert "UTC" in body
