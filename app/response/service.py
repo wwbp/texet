@@ -33,6 +33,7 @@ from app.config import (
     get_mail_username,
     get_mail_validate_certs,
     get_moderation_alert_emails,
+    get_public_app_url,
     get_openai_api_key,
     get_sms_outbound_authorization,
     get_sms_outbound_url,
@@ -85,7 +86,7 @@ def _merge_meta(
 def _moderation_notice(source: str, category: str, score: float) -> str:
     if source == "bot":
         return f"A generated reply was moderated due to {category} content with score {score:.2f}."
-    return f"Your message was moderated due to {category} content with score {score:.2f}."
+    return "I can't personally help with that, but your safety matters, and support is available. Call the crisis line at 988 to talk to someone."
 
 
 async def _get_user_queue_lock(user_id: str) -> asyncio.Lock:
@@ -195,9 +196,110 @@ async def _moderate_message(utterance: Utterance) -> tuple[bool, str, str, float
     return await _moderate_text(utterance.text)
 
 
+def _build_moderation_email(
+    user_id: str,
+    utterance_id: str,
+    conversation_id: str,
+    speaker_id: str,
+    utterance_text: str,
+    blocked_category: str,
+    blocked_score: float,
+    recent_chat_history: list[ChatMessage],
+    admin_base_url: str,
+) -> tuple[str, str]:
+    """Return (subject, html_body) for a moderation alert email."""
+    score_pct = int(blocked_score * 100)
+    if blocked_score >= 0.7:
+        score_color = "#c0392b"
+    elif blocked_score >= 0.4:
+        score_color = "#d35400"
+    else:
+        score_color = "#f39c12"
+
+    def _esc(s: str) -> str:
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    utterance_html = _esc(utterance_text)
+    admin_prefix = f"{admin_base_url.rstrip('/')}/console/admin" if admin_base_url else None
+
+    links_html = ""
+    if admin_prefix:
+        links_html = f"""
+        <tr><td style="padding:16px 0 8px;border-top:1px solid #e0e0e0;">
+          <p style="margin:0 0 8px;font-size:13px;font-weight:600;color:#555;text-transform:uppercase;letter-spacing:.05em;">Admin links</p>
+          <table cellpadding="0" cellspacing="0" style="font-size:13px;color:#333;line-height:1.8;">
+            <tr><td style="color:#888;width:110px;">Utterance</td><td><a href="{admin_prefix}/utterance/details/{utterance_id}" style="color:#2980b9;">{utterance_id}</a></td></tr>
+            <tr><td style="color:#888;">Conversation</td><td><a href="{admin_prefix}/conversation/details/{conversation_id}" style="color:#2980b9;">{conversation_id}</a></td></tr>
+            <tr><td style="color:#888;">Speaker</td><td><a href="{admin_prefix}/speaker/details/{speaker_id}" style="color:#2980b9;">{speaker_id}</a></td></tr>
+          </table>
+        </td></tr>"""
+
+    history_rows = ""
+    for msg in recent_chat_history:
+        role = msg.role.value
+        text = _esc(str(msg.content).replace("\n", " ").strip())
+        label_color = "#2c3e50" if role == "user" else "#7f8c8d"
+        history_rows += f'<tr><td style="color:{label_color};font-weight:600;width:40px;vertical-align:top;padding:3px 8px 3px 0;">{role}</td><td style="color:#333;padding:3px 0;">{text}</td></tr>'
+
+    history_html = ""
+    if history_rows:
+        history_html = f"""
+        <tr><td style="padding:16px 0 8px;border-top:1px solid #e0e0e0;">
+          <p style="margin:0 0 8px;font-size:13px;font-weight:600;color:#555;text-transform:uppercase;letter-spacing:.05em;">Recent context</p>
+          <table cellpadding="0" cellspacing="0" style="font-size:13px;width:100%;">{history_rows}</table>
+        </td></tr>"""
+
+    body = f"""<!DOCTYPE html>
+<html><body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,sans-serif;">
+<table cellpadding="0" cellspacing="0" width="100%" style="background:#f5f5f5;padding:24px 0;">
+<tr><td align="center">
+<table cellpadding="0" cellspacing="0" width="560" style="background:#fff;border-radius:6px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.12);">
+
+  <!-- header bar -->
+  <tr><td style="background:{score_color};padding:14px 24px;">
+    <span style="font-size:16px;font-weight:700;color:#fff;letter-spacing:.03em;">&#9888; MODERATION ALERT</span>
+    <span style="float:right;font-size:14px;color:rgba(255,255,255,.85);">{_esc(blocked_category)} &nbsp;·&nbsp; score {blocked_score:.2f} ({score_pct}%)</span>
+  </td></tr>
+
+  <!-- body -->
+  <tr><td style="padding:20px 24px;">
+    <table cellpadding="0" cellspacing="0" width="100%">
+
+      <!-- flagged message -->
+      <tr><td style="padding-bottom:16px;">
+        <p style="margin:0 0 8px;font-size:13px;font-weight:600;color:#555;text-transform:uppercase;letter-spacing:.05em;">Flagged message</p>
+        <div style="background:#fef9f0;border-left:4px solid {score_color};padding:12px 16px;font-size:15px;color:#222;line-height:1.5;border-radius:0 4px 4px 0;">{utterance_html}</div>
+      </td></tr>
+
+      <!-- meta row -->
+      <tr><td style="padding-bottom:16px;border-top:1px solid #e0e0e0;padding-top:16px;">
+        <table cellpadding="0" cellspacing="0" style="font-size:13px;color:#333;line-height:1.9;width:100%;">
+          <tr><td style="color:#888;width:90px;">User</td><td style="font-family:monospace;">{_esc(user_id)}</td></tr>
+          <tr><td style="color:#888;">Category</td><td><strong>{_esc(blocked_category)}</strong></td></tr>
+          <tr><td style="color:#888;">Score</td><td><strong style="color:{score_color};">{blocked_score:.2f}</strong> / 1.00</td></tr>
+        </table>
+      </td></tr>
+
+      {links_html}
+      {history_html}
+
+    </table>
+  </td></tr>
+
+</table>
+</td></tr></table>
+</body></html>"""
+
+    subject = f"[texet] {blocked_category} ({score_pct}%) — {user_id}"
+    return subject, body
+
+
 async def _send_moderation_email(
     user_id: str,
     utterance_id: str,
+    conversation_id: str,
+    speaker_id: str,
+    utterance_text: str,
     blocked_category: str,
     blocked_score: float,
     recent_chat_history: list[ChatMessage],
@@ -227,29 +329,23 @@ async def _send_moderation_email(
         VALIDATE_CERTS=get_mail_validate_certs(),
     )
 
-    history_lines: list[str] = []
-    for idx, message in enumerate(recent_chat_history, start=1):
-        role = message.role.value
-        text = str(message.content).replace("\n", " ").strip()
-        history_lines.append(f"{idx}. role={role} text={text}")
-
-    body = "\n".join(
-        [
-            "event=moderation_blocked",
-            f"user_id={user_id}",
-            f"utterance_id={utterance_id}",
-            f"category={blocked_category}",
-            f"score={blocked_score:.4f}",
-            f"recent_messages={len(history_lines)}",
-            *history_lines,
-        ]
+    subject, body = _build_moderation_email(
+        user_id=user_id,
+        utterance_id=utterance_id,
+        conversation_id=conversation_id,
+        speaker_id=speaker_id,
+        utterance_text=utterance_text,
+        blocked_category=blocked_category,
+        blocked_score=blocked_score,
+        recent_chat_history=recent_chat_history,
+        admin_base_url=get_public_app_url(),
     )
 
     message = MessageSchema(
-        subject=f"[texet] moderation blocked user={user_id} category={blocked_category}",
+        subject=subject,
         recipients=recipients,  # type: ignore[arg-type]
         body=body,
-        subtype=MessageType.plain,
+        subtype=MessageType.html,
     )
     await FastMail(conf).send_message(message)
 
@@ -333,6 +429,9 @@ async def _process_queued_reply(
             await _send_moderation_email(
                 user_id=user_id,
                 utterance_id=user_utterance.id,
+                conversation_id=user_utterance.conversation_id,
+                speaker_id=user_utterance.speaker_id,
+                utterance_text=user_utterance.text,
                 blocked_category=blocked_category,
                 blocked_score=blocked_score,
                 recent_chat_history=blocked_history[-5:],
