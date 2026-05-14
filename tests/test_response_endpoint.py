@@ -125,6 +125,9 @@ def moderation_email_outbox(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, o
     async def _fake_send_moderation_email(
         user_id: str,
         utterance_id: str,
+        conversation_id: str,
+        speaker_id: str,
+        utterance_text: str,
         blocked_category: str,
         blocked_score: float,
         recent_chat_history: list[object],
@@ -133,6 +136,9 @@ def moderation_email_outbox(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, o
             {
                 "user_id": user_id,
                 "utterance_id": utterance_id,
+                "conversation_id": conversation_id,
+                "speaker_id": speaker_id,
+                "utterance_text": utterance_text,
                 "blocked_category": blocked_category,
                 "blocked_score": blocked_score,
                 "recent_chat_history": recent_chat_history,
@@ -457,7 +463,7 @@ async def test_response_sends_moderation_email_when_blocked(
     assert sms_outbox == [
         {
             "user_id": "u-mod",
-            "message": "Your message was moderated due to violence content with score 0.91.",
+            "message": "I can't personally help with that, but your safety matters, and support is available. Call the crisis line at 988 to talk to someone.",
             "utterance_id": body["id"],
             "in_reply_to_utterance_id": body["user_utterance_id"],
         }
@@ -468,6 +474,7 @@ async def test_response_sends_moderation_email_when_blocked(
     assert email["user_id"] == "u-mod"
     assert email["blocked_category"] == "violence"
     assert email["blocked_score"] == pytest.approx(0.91)
+    assert email["utterance_text"] == "blocked message"
 
     async_session.expire_all()
     user_result = await async_session.execute(
@@ -475,6 +482,8 @@ async def test_response_sends_moderation_email_when_blocked(
     )
     user_utterance = user_result.scalar_one()
     assert email["utterance_id"] == user_utterance.id
+    assert email["conversation_id"] == user_utterance.conversation_id
+    assert email["speaker_id"] == user_utterance.speaker_id
     assert user_utterance.status == UTTERANCE_STATUS_MODERATED
 
     recent_history = email["recent_chat_history"]
@@ -497,6 +506,9 @@ async def test_response_does_not_fail_if_moderation_email_errors(
     async def _fail_send_moderation_email(
         user_id: str,
         utterance_id: str,
+        conversation_id: str,
+        speaker_id: str,
+        utterance_text: str,
         blocked_category: str,
         blocked_score: float,
         recent_chat_history: list[object],
@@ -517,7 +529,7 @@ async def test_response_does_not_fail_if_moderation_email_errors(
     assert sms_outbox == [
         {
             "user_id": "u-mod-mail-fail",
-            "message": "Your message was moderated due to harassment content with score 0.73.",
+            "message": "I can't personally help with that, but your safety matters, and support is available. Call the crisis line at 988 to talk to someone.",
             "utterance_id": body["id"],
             "in_reply_to_utterance_id": body["user_utterance_id"],
         }

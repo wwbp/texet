@@ -82,6 +82,12 @@ def get_moderation_alert_emails() -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
+# PUBLIC_APP_URL: base URL used in moderation alert emails for admin links.
+# Example: https://texet.example.com  (no trailing slash)
+def get_public_app_url() -> str:
+    return os.getenv("PUBLIC_APP_URL", "").rstrip("/")
+
+
 # OPENAI_API_KEY: API key for OpenAI.
 def get_openai_api_key() -> str:
     return os.getenv("OPENAI_API_KEY", "")

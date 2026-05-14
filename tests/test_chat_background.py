@@ -136,7 +136,7 @@ async def test_run_deferred_reply_success(
 async def test_run_deferred_reply_moderated_persists_and_sends(
     async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    blocked_reason = "Your message was moderated due to hate content with score 0.89."
+    blocked_reason = "I can't personally help with that, but your safety matters, and support is available. Call the crisis line at 988 to talk to someone."
 
     async def _fake_moderate_message(_utterance: Utterance) -> tuple[bool, str, str, float]:
         return True, blocked_reason, "hate", 0.89
