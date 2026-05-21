@@ -170,7 +170,7 @@ def test_speaker_link_correct() -> None:
 def test_trailing_slash_on_base_url_does_not_double_slash() -> None:
     _, body = _build(admin_base_url="https://texet.example.com/", utterance_id="utt-abc")
     assert "//console" not in body
-    assert f"https://texet.example.com/console/admin/utterance/details/utt-abc" in body
+    assert "https://texet.example.com/console/admin/utterance/details/utt-abc" in body
 
 
 def test_no_admin_links_when_url_not_configured() -> None:
@@ -297,6 +297,6 @@ def test_timestamp_appears_before_flagged_message_text() -> None:
 
 
 def test_timestamp_utc_fallback_when_no_tzname() -> None:
-    ts = datetime.datetime(2026, 5, 14, 9, 0, tzinfo=datetime.timezone.utc)
+    ts = datetime.datetime(2026, 5, 14, 9, 0, tzinfo=datetime.UTC)
     _, body = _build(utterance_timestamp=ts)
     assert "UTC" in body

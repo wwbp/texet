@@ -53,33 +53,33 @@ async def test_get_or_create_conversation_reuses(async_session: AsyncSession) ->
 
 
 @pytest.mark.asyncio
-async def test_different_day_identifiers_create_separate_conversations(
+async def test_different_day_numbers_create_separate_conversations(
     async_session: AsyncSession,
 ) -> None:
     speaker = await get_or_create_speaker(async_session, "user-day-scope", meta={"type": "user"})
 
-    conv_day1 = await get_or_create_conversation(async_session, speaker.id, day_identifier=1)
+    conv_day1 = await get_or_create_conversation(async_session, speaker.id, day_number=1)
     await async_session.commit()
 
-    conv_day2 = await get_or_create_conversation(async_session, speaker.id, day_identifier=2)
+    conv_day2 = await get_or_create_conversation(async_session, speaker.id, day_number=2)
     await async_session.commit()
 
     assert conv_day1.id != conv_day2.id
-    assert conv_day1.day_identifier == 1
-    assert conv_day2.day_identifier == 2
+    assert conv_day1.day_number == 1
+    assert conv_day2.day_number == 2
 
     count = await async_session.execute(select(func.count()).select_from(Conversation))
     assert count.scalar_one() == 2
 
 
 @pytest.mark.asyncio
-async def test_same_day_identifier_reuses_conversation(async_session: AsyncSession) -> None:
+async def test_same_day_number_reuses_conversation(async_session: AsyncSession) -> None:
     speaker = await get_or_create_speaker(async_session, "user-day-reuse", meta={"type": "user"})
 
-    first = await get_or_create_conversation(async_session, speaker.id, day_identifier=5)
+    first = await get_or_create_conversation(async_session, speaker.id, day_number=5)
     await async_session.commit()
 
-    second = await get_or_create_conversation(async_session, speaker.id, day_identifier=5)
+    second = await get_or_create_conversation(async_session, speaker.id, day_number=5)
     await async_session.commit()
 
     assert second.id == first.id
@@ -96,14 +96,14 @@ async def test_no_day_conversation_is_separate_from_day_conversations(
     conv_no_day = await get_or_create_conversation(async_session, speaker.id)
     await async_session.commit()
 
-    conv_day1 = await get_or_create_conversation(async_session, speaker.id, day_identifier=1)
+    conv_day1 = await get_or_create_conversation(async_session, speaker.id, day_number=1)
     await async_session.commit()
 
     assert conv_no_day.id != conv_day1.id
-    assert conv_no_day.day_identifier is None
-    assert conv_day1.day_identifier == 1
+    assert conv_no_day.day_number is None
+    assert conv_day1.day_number == 1
 
-    # No-day conversation is still reused when called without day_identifier
+    # No-day conversation is still reused when called without day_number
     again = await get_or_create_conversation(async_session, speaker.id)
     await async_session.commit()
     assert again.id == conv_no_day.id

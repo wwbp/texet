@@ -68,13 +68,13 @@ async def create_conversation(
     session: AsyncSession,
     owner_speaker_id: str,
     status: str = "open",
-    day_identifier: int | None = None,
+    day_number: int | None = None,
     meta: dict[str, Any] | None = None,
 ) -> Conversation:
     conversation = Conversation(
         owner_speaker_id=owner_speaker_id,
         status=status,
-        day_identifier=day_identifier,
+        day_number=day_number,
         meta=meta,
     )
     session.add(conversation)
@@ -86,13 +86,13 @@ async def get_or_create_conversation(
     session: AsyncSession,
     owner_speaker_id: str,
     status: str = "open",
-    day_identifier: int | None = None,
+    day_number: int | None = None,
     meta: dict[str, Any] | None = None,
 ) -> Conversation:
     day_filter = (
-        Conversation.day_identifier == day_identifier
-        if day_identifier is not None
-        else Conversation.day_identifier.is_(None)
+        Conversation.day_number == day_number
+        if day_number is not None
+        else Conversation.day_number.is_(None)
     )
     result = await session.execute(
         select(Conversation).where(
@@ -110,7 +110,7 @@ async def get_or_create_conversation(
             conversation = Conversation(
                 owner_speaker_id=owner_speaker_id,
                 status=status,
-                day_identifier=day_identifier,
+                day_number=day_number,
                 meta=meta,
             )
             session.add(conversation)
@@ -255,10 +255,10 @@ async def create_queued_utterance(
 
 async def get_daily_prompt(
     session: AsyncSession,
-    day_identifier: int,
+    day_number: int,
 ) -> DailyPrompt | None:
     result = await session.execute(
-        select(DailyPrompt).where(DailyPrompt.day_identifier == day_identifier)
+        select(DailyPrompt).where(DailyPrompt.day_number == day_number)
     )
     return result.scalar_one_or_none()
 

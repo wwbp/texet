@@ -26,7 +26,7 @@ def _render_daily_prompts_page(
         rows = "\n".join(
             f"""
             <tr>
-              <td class="mono">{_escape(str(prompt.day_identifier))}</td>
+              <td class="mono">{_escape(str(prompt.day_number))}</td>
               <td>{_escape(_serialize_datetime(prompt.created_at))}</td>
               <td>
                 <form method="post"
@@ -139,14 +139,14 @@ def _render_daily_prompts_page(
         <div class="wrap">
           <h1>Daily Prompts</h1>
           <p>One prompt per day number. The matching prompt is appended to the system prompt
-             when a request includes that <code>day_identifier</code> in its metadata.</p>
+             when a request includes that <code>day_number</code> in its metadata.</p>
           {error_block}
 
           <h2>Add prompt</h2>
           <form class="create-form" method="post" action="{CONSOLE_PREFIX}/daily-prompts">
             <label style="font-size:13px;font-weight:600;">
               Day number
-              <input type="number" name="day_identifier" min="1" required
+              <input type="number" name="day_number" min="1" required
                      placeholder="e.g. 1" />
             </label>
             <textarea name="content" rows="4" required
@@ -182,7 +182,7 @@ def _render_daily_prompts_page(
 
 
 async def _list_prompts(session: AsyncSession) -> list[DailyPrompt]:
-    result = await session.execute(select(DailyPrompt).order_by(DailyPrompt.day_identifier.asc()))
+    result = await session.execute(select(DailyPrompt).order_by(DailyPrompt.day_number.asc()))
     return list(result.scalars().all())
 
 
@@ -202,15 +202,15 @@ async def console_daily_prompts_create(
 ) -> HTMLResponse:
     form = await request.form()
     content = str(form.get("content") or "").strip()
-    raw_id = str(form.get("day_identifier") or "").strip()
+    raw_id = str(form.get("day_number") or "").strip()
 
     if not content:
         return _render_daily_prompts_page(await _list_prompts(session), "Content is required.")
     if not raw_id:
         return _render_daily_prompts_page(await _list_prompts(session), "Day number is required.")
     try:
-        day_identifier = int(raw_id)
-        if day_identifier < 1:
+        day_number = int(raw_id)
+        if day_number < 1:
             raise ValueError
     except ValueError:
         return _render_daily_prompts_page(
@@ -219,11 +219,11 @@ async def console_daily_prompts_create(
 
     try:
         async with session.begin():
-            session.add(DailyPrompt(day_identifier=day_identifier, content=content))
+            session.add(DailyPrompt(day_number=day_number, content=content))
     except IntegrityError:
         return _render_daily_prompts_page(
             await _list_prompts(session),
-            f"A prompt for day {day_identifier} already exists.",
+            f"A prompt for day {day_number} already exists.",
         )
 
     return _render_daily_prompts_page(await _list_prompts(session))

@@ -33,8 +33,8 @@ from app.config import (
     get_mail_username,
     get_mail_validate_certs,
     get_moderation_alert_emails,
-    get_public_app_url,
     get_openai_api_key,
+    get_public_app_url,
     get_sms_outbound_authorization,
     get_sms_outbound_url,
     get_sms_timeout_seconds,
@@ -487,14 +487,14 @@ async def _process_queued_reply(
     provider = sp.provider if sp else "openai"
     model_id = sp.model_id if sp else "gpt-4o-mini"
 
-    day_identifier: int | None = None
+    day_number: int | None = None
     if user_utterance.meta:
-        raw = user_utterance.meta.get("day_identifier")
+        raw = user_utterance.meta.get("day_number")
         if isinstance(raw, int):
-            day_identifier = raw
+            day_number = raw
 
     daily_prompt = (
-        await get_daily_prompt(session, day_identifier) if day_identifier is not None else None
+        await get_daily_prompt(session, day_number) if day_number is not None else None
     )
     daily_content = daily_prompt.content if daily_prompt else None
 
@@ -507,8 +507,8 @@ async def _process_queued_reply(
     conversation = await session.get(Conversation, user_utterance.conversation_id)
     if conversation is not None:
         prompt_meta: dict[str, Any] = {"texet_instruction_prompt": system_prompt}
-        if day_identifier is not None:
-            prompt_meta["texet_day_identifier"] = day_identifier
+        if day_number is not None:
+            prompt_meta["texet_day_number"] = day_number
         conversation.meta = _merge_meta(conversation.meta, prompt_meta)
         await session.flush()
 
@@ -603,18 +603,18 @@ async def process_chat(
     background_tasks: BackgroundTasks,
     meta: dict[str, Any] | None = None,
 ) -> ChatQueuedResponse:
-    day_identifier: int | None = None
+    day_number: int | None = None
     if meta:
-        raw = meta.get("day_identifier")
+        raw = meta.get("day_number")
         if isinstance(raw, int):
-            day_identifier = raw
+            day_number = raw
 
     async with session.begin():
         speaker = await get_or_create_speaker(session, payload.user_id, meta={"type": "user"})
         bot = await get_or_create_bot_speaker(session, payload.user_id)
 
         conversation = await get_or_create_conversation(
-            session, speaker.id, day_identifier=day_identifier
+            session, speaker.id, day_number=day_number
         )
 
         user_utterance = await create_utterance(
@@ -662,17 +662,17 @@ async def _persist_initial_bot_message(
     payload: ResponseRequest,
 ) -> ResponseQueuedResponse:
     metadata = payload.metadata or {}
-    day_identifier: int | None = None
-    raw = metadata.get("day_identifier")
+    day_number: int | None = None
+    raw = metadata.get("day_number")
     if isinstance(raw, int):
-        day_identifier = raw
+        day_number = raw
 
     async with session.begin():
         speaker = await get_or_create_speaker(session, payload.user_id, meta={"type": "user"})
         bot = await get_or_create_bot_speaker(session, payload.user_id)
 
         conversation = await get_or_create_conversation(
-            session, speaker.id, day_identifier=day_identifier
+            session, speaker.id, day_number=day_number
         )
 
         bot_utterance = await create_utterance(

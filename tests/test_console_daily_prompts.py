@@ -43,7 +43,7 @@ async def test_console_daily_prompts_requires_auth(console_client: AsyncClient) 
     assert response.status_code == 401
 
     response = await console_client.post(
-        "/console/daily-prompts", data={"day_identifier": "1", "content": "x"}
+        "/console/daily-prompts", data={"day_number": "1", "content": "x"}
     )
     assert response.status_code == 401
 
@@ -66,12 +66,12 @@ async def test_console_daily_prompts_crud(
     create = await console_client.post(
         "/console/daily-prompts",
         headers=headers,
-        data={"day_identifier": "3", "content": "Walk 10 minutes."},
+        data={"day_number": "3", "content": "Walk 10 minutes."},
     )
     assert create.status_code == 200
     assert "Walk 10 minutes." in create.text
 
-    result = await async_session.execute(select(DailyPrompt).where(DailyPrompt.day_identifier == 3))
+    result = await async_session.execute(select(DailyPrompt).where(DailyPrompt.day_number == 3))
     created = result.scalar_one()
     assert created.content == "Walk 10 minutes."
     prompt_id = created.id
@@ -108,12 +108,12 @@ async def test_console_daily_prompts_duplicate_identifier(
     await console_client.post(
         "/console/daily-prompts",
         headers=headers,
-        data={"day_identifier": "10", "content": "First."},
+        data={"day_number": "10", "content": "First."},
     )
     response = await console_client.post(
         "/console/daily-prompts",
         headers=headers,
-        data={"day_identifier": "10", "content": "Duplicate."},
+        data={"day_number": "10", "content": "Duplicate."},
     )
     assert response.status_code == 400
     assert "already exists" in response.text
@@ -125,14 +125,14 @@ async def test_console_daily_prompts_missing_content(console_client: AsyncClient
     response = await console_client.post(
         "/console/daily-prompts",
         headers=headers,
-        data={"day_identifier": "2", "content": "   "},
+        data={"day_number": "2", "content": "   "},
     )
     assert response.status_code == 400
     assert "Content is required." in response.text
 
 
 @pytest.mark.asyncio
-async def test_console_daily_prompts_missing_day_identifier(console_client: AsyncClient) -> None:
+async def test_console_daily_prompts_missing_day_number(console_client: AsyncClient) -> None:
     headers = _basic_auth_header("admin", "secret")
     response = await console_client.post(
         "/console/daily-prompts",
@@ -144,12 +144,12 @@ async def test_console_daily_prompts_missing_day_identifier(console_client: Asyn
 
 
 @pytest.mark.asyncio
-async def test_console_daily_prompts_invalid_day_identifier(console_client: AsyncClient) -> None:
+async def test_console_daily_prompts_invalid_day_number(console_client: AsyncClient) -> None:
     headers = _basic_auth_header("admin", "secret")
     response = await console_client.post(
         "/console/daily-prompts",
         headers=headers,
-        data={"day_identifier": "0", "content": "Some content."},
+        data={"day_number": "0", "content": "Some content."},
     )
     assert response.status_code == 400
     assert "positive integer" in response.text

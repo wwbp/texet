@@ -62,3 +62,6 @@ smoke-moderation: ## Live moderation smoke test only (requires OPENAI_API_KEY)
 
 load: ## Locust load test UI (HOST=http://localhost:8000, requires TEXET_API_KEY)
 	uv run locust --host $${HOST:-http://localhost:8000}
+
+load-hub: ## Hub load test UI (HOST=..., requires HUB_API_KEY and DATABASE_URL_STAGING)
+	TEST_MODE=true uv run locust -f locust_hub.py --host $${HOST:?HOST is required}
