@@ -17,7 +17,7 @@ from app.console.core import _authorized, _credentials_valid, _now
 from app.db import get_engine
 from app.models.admin import AdminExport
 from app.models.auth import ApiKey
-from app.models.response import Conversation, Speaker, Utterance
+from app.models.response import Conversation, Speaker, Utterance, WeeklySummary
 
 
 def _fmt_dt(m: object, a: str) -> str:
@@ -61,7 +61,7 @@ def _fmt_day(m: object, a: str) -> str:
 
 
 def _fmt_text_truncated(m: object, a: str) -> str:
-    text: str | None = getattr(m, "text", None)
+    text: str | None = getattr(m, a, None)
     if text and len(text) > 100:
         return text[:100] + "…"
     return text or "—"
@@ -163,6 +163,35 @@ class ConversationAdmin(ModelView, model=Conversation):
         "last_activity_at": "Last Active",
         "created_at": "Started",
         "meta": "Instruction Prompt",
+    }
+
+
+class WeeklySummaryAdmin(ModelView, model=WeeklySummary):
+    name = "Weekly Summary"
+    name_plural = "Weekly Summaries"
+    can_create = False
+    can_edit = False
+    can_delete = False
+    can_view_details = True
+    can_export = True
+    export_types = ["csv"]
+    page_size = 50
+    page_size_options = [25, 50, 100]
+    column_list = ["user_id", "week_start", "summary", "id"]
+    column_details_list = ["user_id", "week_start", "summary", "id"]
+    column_searchable_list = ["user_id"]
+    column_sortable_list = [WeeklySummary.week_start, WeeklySummary.user_id]
+    column_default_sort = (WeeklySummary.week_start, True)
+    column_filters = [
+        OperationColumnFilter(WeeklySummary.user_id, title="User ID"),
+        OperationColumnFilter(WeeklySummary.week_start, title="Week Start"),
+    ]
+    column_formatters = {"summary": _fmt_text_truncated}  # type: ignore[dict-item]
+    column_labels = {
+        "id": "Summary ID",
+        "user_id": "User",
+        "week_start": "Week Start",
+        "summary": "Summary",
     }
 
 
@@ -332,6 +361,7 @@ def init_console(app: FastAPI) -> None:
         admin = Admin(app, get_engine(), authentication_backend=authentication_backend)
     admin.add_view(SpeakerAdmin)
     admin.add_view(ConversationAdmin)
+    admin.add_view(WeeklySummaryAdmin)
     admin.add_view(UtteranceAdmin)
     admin.add_view(ApiKeyAdmin)
     admin.add_view(AdminExportAdmin)
