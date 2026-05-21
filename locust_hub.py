@@ -7,10 +7,9 @@ import random
 import string
 import time
 
+from locust import HttpUser, SequentialTaskSet, between, events, task
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
-from locust import HttpUser, SequentialTaskSet, between, events, task
 
 logger = logging.getLogger(__name__)
 
