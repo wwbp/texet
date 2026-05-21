@@ -47,6 +47,14 @@ def _fmt_meta_detail(m: object, a: str) -> str:
     return "\n".join(lines)
 
 
+def _fmt_instruction_prompt(m: object, a: str) -> str:
+    """Extract only the instruction prompt from meta — exactly what is sent to the LLM."""
+    v = getattr(m, a, None)
+    if not v:
+        return "—"
+    return v.get("texet_instruction_prompt") or "—"
+
+
 def _fmt_day(m: object, a: str) -> str:
     v = getattr(m, a, None)
     return str(v) if v is not None else "—"
@@ -146,7 +154,7 @@ class ConversationAdmin(ModelView, model=Conversation):
         "last_activity_at": _fmt_dt,  # type: ignore[dict-item]
         "created_at": _fmt_dt,  # type: ignore[dict-item]
         "day_number": _fmt_day,  # type: ignore[dict-item]
-        "meta": _fmt_meta_detail,  # type: ignore[dict-item]
+        "meta": _fmt_instruction_prompt,  # type: ignore[dict-item]
     }
     column_labels = {
         "id": "Conversation ID",
@@ -154,6 +162,7 @@ class ConversationAdmin(ModelView, model=Conversation):
         "day_number": "Day",
         "last_activity_at": "Last Active",
         "created_at": "Started",
+        "meta": "Instruction Prompt",
     }
 
 
