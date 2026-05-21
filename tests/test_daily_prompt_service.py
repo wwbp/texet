@@ -58,13 +58,13 @@ def _stub_pass_through(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
 
 
 @pytest.mark.asyncio
-async def test_daily_prompt_appended_when_day_identifier_matches(
+async def test_daily_prompt_appended_when_day_number_matches(
     async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     captured = _stub_pass_through(monkeypatch)
 
     async with async_session.begin():
-        async_session.add(DailyPrompt(day_identifier=5, content="Do breathing exercises."))
+        async_session.add(DailyPrompt(day_number=5, content="Do breathing exercises."))
 
     async with async_session.begin():
         speaker = await get_or_create_speaker(async_session, "u-dp-match", meta={"type": "user"})
@@ -75,7 +75,7 @@ async def test_daily_prompt_appended_when_day_identifier_matches(
             conversation.id,
             speaker.id,
             "hi",
-            meta={"day_identifier": 5},
+            meta={"day_number": 5},
         )
         bot_utterance = await create_queued_utterance(
             async_session, conversation.id, bot.id, reply_to_id=user_utterance.id
@@ -105,7 +105,7 @@ async def test_no_daily_prompt_when_identifier_unmatched(
             conversation.id,
             speaker.id,
             "hi",
-            meta={"day_identifier": 99},
+            meta={"day_number": 99},
         )
         bot_utterance = await create_queued_utterance(
             async_session, conversation.id, bot.id, reply_to_id=user_utterance.id
@@ -126,7 +126,7 @@ async def test_no_daily_prompt_when_no_identifier_in_meta(
     captured = _stub_pass_through(monkeypatch)
 
     async with async_session.begin():
-        async_session.add(DailyPrompt(day_identifier=1, content="Should not appear."))
+        async_session.add(DailyPrompt(day_number=1, content="Should not appear."))
 
     async with async_session.begin():
         speaker = await get_or_create_speaker(async_session, "u-dp-nometa", meta={"type": "user"})
@@ -155,7 +155,7 @@ async def test_instruction_prompt_saved_to_conversation_meta(
     _stub_pass_through(monkeypatch)
 
     async with async_session.begin():
-        async_session.add(DailyPrompt(day_identifier=2, content="Day 2 activity."))
+        async_session.add(DailyPrompt(day_number=2, content="Day 2 activity."))
 
     async with async_session.begin():
         speaker = await get_or_create_speaker(async_session, "u-dp-meta", meta={"type": "user"})
@@ -167,7 +167,7 @@ async def test_instruction_prompt_saved_to_conversation_meta(
             conversation.id,
             speaker.id,
             "hi",
-            meta={"day_identifier": 2},
+            meta={"day_number": 2},
         )
         bot_utterance = await create_queued_utterance(
             async_session, conversation.id, bot.id, reply_to_id=user_utterance.id
@@ -184,11 +184,11 @@ async def test_instruction_prompt_saved_to_conversation_meta(
     assert conv.meta is not None
     assert "texet_instruction_prompt" in conv.meta
     assert "[Daily Activity]" in conv.meta["texet_instruction_prompt"]
-    assert conv.meta.get("texet_day_identifier") == 2
+    assert conv.meta.get("texet_day_number") == 2
 
 
 @pytest.mark.asyncio
-async def test_instruction_prompt_saved_without_day_identifier(
+async def test_instruction_prompt_saved_without_day_number(
     async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _stub_pass_through(monkeypatch)
@@ -215,7 +215,7 @@ async def test_instruction_prompt_saved_without_day_identifier(
     assert conv is not None
     assert conv.meta is not None
     assert "texet_instruction_prompt" in conv.meta
-    assert "texet_day_identifier" not in conv.meta
+    assert "texet_day_number" not in conv.meta
 
 
 @pytest.mark.asyncio

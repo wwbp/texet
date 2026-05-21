@@ -27,7 +27,7 @@ def _fmt_dt(m: object, a: str) -> str:
 
 _META_LABELS: dict[str, str] = {
     "texet_instruction_prompt": "Instruction Prompt",
-    "texet_day_identifier": "Day (from prompt)",
+    "texet_day_number": "Day (from prompt)",
     "texet_moderation_source": "Moderation Source",
     "texet_moderation_category": "Moderation Category",
     "texet_moderation_score": "Moderation Score",
@@ -114,10 +114,10 @@ class ConversationAdmin(ModelView, model=Conversation):
     export_types = ["csv"]
     page_size = 50
     page_size_options = [25, 50, 100]
-    column_list = ["owner_speaker_id", "day_identifier", "status", "last_activity_at", "id"]
+    column_list = ["owner_speaker_id", "day_number", "status", "last_activity_at", "id"]
     column_details_list = [
         "owner_speaker_id",
-        "day_identifier",
+        "day_number",
         "status",
         "last_activity_at",
         "created_at",
@@ -128,30 +128,30 @@ class ConversationAdmin(ModelView, model=Conversation):
     column_sortable_list = [
         Conversation.last_activity_at,
         Conversation.created_at,
-        Conversation.day_identifier,
+        Conversation.day_number,
         Conversation.status,
     ]
     column_default_sort = (Conversation.last_activity_at, True)
     column_filters = [
         AllUniqueStringValuesFilter(Conversation.status, title="Status"),
-        OperationColumnFilter(Conversation.day_identifier, title="Day"),
+        OperationColumnFilter(Conversation.day_number, title="Day"),
         OperationColumnFilter(Conversation.owner_speaker_id, title="User ID"),
     ]
     column_formatters = {
         "last_activity_at": _fmt_dt,  # type: ignore[dict-item]
         "created_at": _fmt_dt,  # type: ignore[dict-item]
-        "day_identifier": _fmt_day,  # type: ignore[dict-item]
+        "day_number": _fmt_day,  # type: ignore[dict-item]
     }
     column_formatters_detail = {
         "last_activity_at": _fmt_dt,  # type: ignore[dict-item]
         "created_at": _fmt_dt,  # type: ignore[dict-item]
-        "day_identifier": _fmt_day,  # type: ignore[dict-item]
+        "day_number": _fmt_day,  # type: ignore[dict-item]
         "meta": _fmt_meta_detail,  # type: ignore[dict-item]
     }
     column_labels = {
         "id": "Conversation ID",
         "owner_speaker_id": "User",
-        "day_identifier": "Day",
+        "day_number": "Day",
         "last_activity_at": "Last Active",
         "created_at": "Started",
     }
