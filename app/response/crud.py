@@ -181,11 +181,27 @@ async def build_chat_history(
             continue
         if not utterance.text:
             continue
+        if utterance.meta and utterance.meta.get("texet_hub_initial"):
+            continue
         if utterance.speaker_id == bot_id:
             chat_history.append(ChatMessage.assistant(utterance.text))
         else:
             chat_history.append(ChatMessage.user(utterance.text))
     return chat_history
+
+
+async def get_opening_message(session: AsyncSession, conversation_id: str) -> str | None:
+    result = await session.execute(
+        select(Utterance)
+        .where(
+            Utterance.conversation_id == conversation_id,
+            Utterance.meta.contains({"texet_hub_initial": True}),
+        )
+        .order_by(Utterance.timestamp)
+        .limit(1)
+    )
+    utterance = result.scalar_one_or_none()
+    return utterance.text if utterance and utterance.text else None
 
 
 async def create_utterance(

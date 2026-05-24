@@ -49,6 +49,7 @@ from app.response.crud import (
     create_utterance,
     get_daily_prompt,
     get_latest_system_prompt,
+    get_opening_message,
     get_or_create_bot_speaker,
     get_or_create_conversation,
     get_or_create_speaker,
@@ -498,10 +499,12 @@ async def _process_queued_reply(
     )
     daily_content = daily_prompt.content if daily_prompt else None
 
+    opening_message = await get_opening_message(session, user_utterance.conversation_id)
     system_prompt = compose_instruction_prompt(
         base=base_prompt,
         daily_content=daily_content,
         weekly_summary=prev_summary,
+        opening_message=opening_message,
     )
 
     conversation = await session.get(Conversation, user_utterance.conversation_id)

@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from kani.models import ChatRole  # type: ignore[import-untyped]
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker
 
 from app.config import (
@@ -656,3 +657,95 @@ async def test_moderate_text_empty_results_returns_not_blocked(
     assert reason == ""
     assert category == ""
     assert score == 0.0
+
+
+@pytest.mark.asyncio
+async def test_initial_bot_message_injected_into_prompt_not_history(
+    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: initial bot message must not appear as the first messages-array turn.
+
+    When a conversation is seeded via the is_initial=True flow, the bot utterance is tagged
+    texet_hub_initial=True.  The fix excludes it from build_chat_history (so Bedrock never
+    sees an assistant-first conversation) and instead injects its text into the system prompt
+    via the [Opening message] section.
+    """
+    captured: dict[str, object] = {}
+
+    async def _capturing_generate_reply(
+        chat_history: list[object], query: str, system_prompt: str, **_kwargs: object
+    ) -> str:
+        captured["chat_history"] = list(chat_history)
+        captured["system_prompt"] = system_prompt
+        return "reply"
+
+    async def _allow_moderation(*_args: object, **_kwargs: object) -> tuple[bool, str, str, float]:
+        return False, "", "", 0.0
+
+    async def _fake_send_sms(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(response_service, "_moderate_message", _allow_moderation)
+    monkeypatch.setattr(response_service, "_moderate_text", _allow_moderation)
+    monkeypatch.setattr(response_service, "_generate_reply", _capturing_generate_reply)
+    monkeypatch.setattr(response_service, "_send_sms", _fake_send_sms)
+
+    opening_text = "Hi! I'm your study buddy. How are you feeling today?"
+    user_id = "u-initial-bot-fixed"
+
+    async with async_session.begin():
+        speaker = await get_or_create_speaker(async_session, user_id, meta={"type": "user"})
+        bot = await get_or_create_bot_speaker(async_session, user_id)
+        conversation = await get_or_create_conversation(async_session, speaker.id)
+
+        # Simulate is_initial=True: hub seeds the conversation with a tagged bot utterance.
+        await create_utterance(
+            async_session,
+            conversation.id,
+            bot.id,
+            opening_text,
+            status=UTTERANCE_STATUS_SENT,
+            meta={"texet_hub_initial": True},
+        )
+
+        user_utterance = await create_utterance(
+            async_session,
+            conversation.id,
+            speaker.id,
+            "pretty good thanks",
+        )
+        bot_utterance = await create_queued_utterance(
+            async_session,
+            conversation.id,
+            bot.id,
+            reply_to_id=user_utterance.id,
+        )
+        user_utterance_id = user_utterance.id
+        bot_utterance_id = bot_utterance.id
+
+    sessionmaker = _sessionmaker_from(async_session)
+    await response_service._run_deferred_reply(
+        user_id,
+        user_utterance_id,
+        bot_utterance_id,
+        sessionmaker,
+    )
+
+    # The reply should succeed — no Bedrock validation error.
+    async_session.expire_all()
+    refreshed = await async_session.get(Utterance, bot_utterance_id)
+    assert refreshed is not None
+    assert refreshed.status == UTTERANCE_STATUS_SENT
+    assert refreshed.error is None
+
+    # The history passed to the engine must not start with an assistant message.
+    history = captured.get("chat_history", [])
+    assert not history or getattr(history[0], "role", None) != ChatRole.ASSISTANT, (
+        "history[0] is still ASSISTANT — initial bot message was not excluded from chat_history"
+    )
+
+    # The opening message must appear in the system prompt instead.
+    system_prompt = captured.get("system_prompt", "")
+    assert opening_text in str(system_prompt), (
+        "Opening message was not injected into the system prompt"
+    )
