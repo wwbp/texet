@@ -771,7 +771,7 @@ async def test_initial_message_persisted_as_bot_utterance(
 
 
 @pytest.mark.asyncio
-async def test_initial_message_appears_as_assistant_in_chat_history(
+async def test_initial_message_excluded_from_history_injected_into_system_prompt(
     async_client: AsyncClient,
     async_session: AsyncSession,
     sms_outbox: list[dict[str, str]],
@@ -795,8 +795,10 @@ async def test_initial_message_appears_as_assistant_in_chat_history(
     assert response.status_code == 202
 
     assert len(kani_stub) == 1
-    history = kani_stub[0]["history"]
-    assert history == [("assistant", "Hello, welcome!")]
+    # Initial bot message must not appear in the messages array (Bedrock requires user-first).
+    assert kani_stub[0]["history"] == []
+    # Instead it must be present in the system prompt for context.
+    assert "Hello, welcome!" in str(kani_stub[0]["system_prompt"])
 
 
 @pytest.mark.asyncio

@@ -176,6 +176,9 @@ async def test_pipeline_chat_history_limited_to_current_week(
         current_utt = await create_utterance(
             async_session, conversation.id, speaker.id, "current query"
         )
+        # Pin the current query timestamp after this_week_ts so the up_to_timestamp
+        # filter always includes "this week message" regardless of what day the test runs.
+        current_utt.timestamp = this_week_ts + datetime.timedelta(hours=1)
         bot_utt = await create_queued_utterance(
             async_session, conversation.id, bot.id, reply_to_id=current_utt.id
         )
