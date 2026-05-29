@@ -30,6 +30,7 @@
 | **Conversation** | A container for an ordered set of Utterances; keyed by `owner_speaker_id` + `status=open` + optional `day_number`; at most one open conversation per user per day |
 | **Utterance** | A single message (user or bot) within a Conversation; has `status`, `text`, `speaker_id`, `reply_to_id`, `meta` (JSON), `timestamp` |
 | **Utterance status** | `queued` → bot reply placeholder; `received` → user message stored; `sent` → delivered to SMS Hub; `moderated` → blocked; `failed` → delivery error |
+| **get-or-create** | SELECT first; if not found, INSERT inside a savepoint; if race/IntegrityError, SELECT again — existing row is never modified |
 | **is_initial** | Flag in request metadata — marks a pre-written bot opener injected by the hub to seed a conversation, bypasses the full pipeline |
 | **day_number** | Integer in request metadata that selects a `DailyPrompt` record (topic/activity for that study day) |
 | **DailyPrompt** | Admin-configured per-day content injected into the system prompt |
@@ -66,8 +67,10 @@
                         ║    │   → 202 "recorded"   │ ║              ║                  ║
                         ║    │                      │ ║              ║                  ║
                         ║    │ else:                │ ║              ║                  ║
-                        ║    │   upsert Speaker     ├─╬──upsert──────►                  ║
-                        ║    │   upsert Conversation├─╬──upsert──────►                  ║
+                        ║    │   get-or-create      ├─╬──SELECT/─────►  Speaker         ║
+                        ║    │     Speaker          │ ║   INSERT     ║                  ║
+                        ║    │   get-or-create      ├─╬──SELECT/─────►  Conversation    ║
+                        ║    │     Conversation     │ ║   INSERT     ║                  ║
                         ║    │   INSERT user utt    ├─╬──RECEIVED────►                  ║
                         ║    │   INSERT bot utt     ├─╬──QUEUED/null─►                  ║
                         ║    │   schedule bg task   │ ║              ║                  ║
@@ -149,7 +152,7 @@
                         ║    │    build transcript │  ║              ║                  ║
                         ║    │    LLM summarize    ├──╬──────────────╬──► gpt-4o-mini   ║
                         ║    │    (3-5 sentences)  ◄──╬──────────────╬── summary text   ║
-                        ║    │    upsert summary   ├──╬──UPSERT───────► WeeklySummary   ║
+                        ║    │    write summary    ├──╬──INSERT/UPDATE► WeeklySummary   ║
                         ║    └─────────────────────┘  ║              ║                  ║
                         ║                              ║              ║                  ║
 ════════════════════════╬══ ADMIN (session-auth · sqladmin) ═════════╬══════════════════╬══════════
