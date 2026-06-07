@@ -229,3 +229,93 @@ async def test_compose_instruction_prompt_sections_order() -> None:
     daily_pos = result.index("[Daily Activity]")
     summary_pos = result.index("[Previous week summary]")
     assert base_pos < daily_pos < summary_pos
+
+
+@pytest.mark.asyncio
+async def test_user_local_time_in_system_prompt(
+    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured = _stub_pass_through(monkeypatch)
+
+    async with async_session.begin():
+        speaker = await get_or_create_speaker(async_session, "u-ult-present", meta={"type": "user"})
+        bot = await get_or_create_bot_speaker(async_session, "u-ult-present")
+        conversation = await get_or_create_conversation(async_session, speaker.id)
+        user_utterance = await create_utterance(
+            async_session,
+            conversation.id,
+            speaker.id,
+            "hi",
+            meta={"user_local_time": "2026-06-07T14:30:00-05:00"},
+        )
+        bot_utterance = await create_queued_utterance(
+            async_session, conversation.id, bot.id, reply_to_id=user_utterance.id
+        )
+
+    sessionmaker = _sessionmaker_from(async_session)
+    await response_service._run_deferred_reply(
+        "u-ult-present", user_utterance.id, bot_utterance.id, sessionmaker
+    )
+
+    prompt = str(captured.get("system_prompt"))
+    assert "[User's Local Time]" in prompt
+    assert "Sunday, June 7, 2026 at 2:30 PM (UTC-5)" in prompt
+
+
+@pytest.mark.asyncio
+async def test_user_local_time_stored_in_conversation_meta(
+    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _stub_pass_through(monkeypatch)
+
+    async with async_session.begin():
+        speaker = await get_or_create_speaker(async_session, "u-ult-meta", meta={"type": "user"})
+        bot = await get_or_create_bot_speaker(async_session, "u-ult-meta")
+        conversation = await get_or_create_conversation(async_session, speaker.id)
+        conv_id = conversation.id
+        user_utterance = await create_utterance(
+            async_session,
+            conversation.id,
+            speaker.id,
+            "hi",
+            meta={"user_local_time": "2026-06-07T14:30:00-05:00"},
+        )
+        bot_utterance = await create_queued_utterance(
+            async_session, conversation.id, bot.id, reply_to_id=user_utterance.id
+        )
+
+    sessionmaker = _sessionmaker_from(async_session)
+    await response_service._run_deferred_reply(
+        "u-ult-meta", user_utterance.id, bot_utterance.id, sessionmaker
+    )
+
+    async_session.expire_all()
+    conv = await async_session.get(Conversation, conv_id)
+    assert conv is not None
+    assert conv.meta is not None
+    assert conv.meta.get("texet_user_local_time") == "2026-06-07T14:30:00-05:00"
+
+
+@pytest.mark.asyncio
+async def test_user_local_time_absent_excluded_from_prompt(
+    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured = _stub_pass_through(monkeypatch)
+
+    async with async_session.begin():
+        speaker = await get_or_create_speaker(async_session, "u-ult-absent", meta={"type": "user"})
+        bot = await get_or_create_bot_speaker(async_session, "u-ult-absent")
+        conversation = await get_or_create_conversation(async_session, speaker.id)
+        user_utterance = await create_utterance(
+            async_session, conversation.id, speaker.id, "hi", meta=None
+        )
+        bot_utterance = await create_queued_utterance(
+            async_session, conversation.id, bot.id, reply_to_id=user_utterance.id
+        )
+
+    sessionmaker = _sessionmaker_from(async_session)
+    await response_service._run_deferred_reply(
+        "u-ult-absent", user_utterance.id, bot_utterance.id, sessionmaker
+    )
+
+    assert "[User's Local Time]" not in str(captured.get("system_prompt"))

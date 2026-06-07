@@ -489,10 +489,14 @@ async def _process_queued_reply(
     model_id = sp.model_id if sp else "gpt-4o-mini"
 
     day_number: int | None = None
+    user_local_time: str | None = None
     if user_utterance.meta:
         raw = user_utterance.meta.get("day_number")
         if isinstance(raw, int):
             day_number = raw
+        raw_time = user_utterance.meta.get("user_local_time")
+        if isinstance(raw_time, str):
+            user_local_time = raw_time
 
     daily_prompt = (
         await get_daily_prompt(session, day_number) if day_number is not None else None
@@ -505,6 +509,7 @@ async def _process_queued_reply(
         daily_content=daily_content,
         weekly_summary=prev_summary,
         opening_message=opening_message,
+        user_local_time=user_local_time,
     )
 
     conversation = await session.get(Conversation, user_utterance.conversation_id)
@@ -512,6 +517,8 @@ async def _process_queued_reply(
         prompt_meta: dict[str, Any] = {"texet_instruction_prompt": system_prompt}
         if day_number is not None:
             prompt_meta["texet_day_number"] = day_number
+        if user_local_time is not None:
+            prompt_meta["texet_user_local_time"] = user_local_time
         conversation.meta = _merge_meta(conversation.meta, prompt_meta)
         await session.flush()
 

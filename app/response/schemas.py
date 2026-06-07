@@ -31,7 +31,7 @@ class ResponseRequest(BaseModel):
                     "user_id": "u1",
                     "input": "hello",
                     "mode": "text",
-                    "metadata": {"source": "sms", "day_number": 1, "is_initial": False},
+                    "metadata": {"source": "sms", "day_number": 1, "is_initial": False, "user_local_time": "2026-06-07T14:30:00-05:00"},
                 }
             ]
         },
