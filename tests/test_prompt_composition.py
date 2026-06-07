@@ -90,3 +90,48 @@ def test_opening_message_before_daily_and_weekly() -> None:
     assert result == (
         "Base.\n\n[Opening message]\nHello!\n\n[Daily Activity]\nDay 1.\n\n[Previous week summary]\nWeek 1."
     )
+
+
+def test_user_local_time_included() -> None:
+    result = compose_instruction_prompt("Base.", user_local_time="2026-06-07T14:30:00-05:00")
+    assert "[User's Local Time]" in result
+    assert "Sunday, June 7, 2026 at 2:30 PM (UTC-5)" in result
+    assert "time of day" in result
+
+
+def test_user_local_time_none_excluded() -> None:
+    result = compose_instruction_prompt("Base.", user_local_time=None)
+    assert "[User's Local Time]" not in result
+    assert result == "Base."
+
+
+def test_user_local_time_empty_excluded() -> None:
+    result = compose_instruction_prompt("Base.", user_local_time="   ")
+    assert "[User's Local Time]" not in result
+
+
+def test_user_local_time_invalid_excluded() -> None:
+    result = compose_instruction_prompt("Base.", user_local_time="not-a-date")
+    assert "[User's Local Time]" not in result
+
+
+def test_user_local_time_utc_offset() -> None:
+    result = compose_instruction_prompt("Base.", user_local_time="2026-01-15T09:00:00+05:30")
+    assert "UTC+5:30" in result
+
+
+def test_user_local_time_utc_zero() -> None:
+    result = compose_instruction_prompt("Base.", user_local_time="2026-06-07T12:00:00+00:00")
+    assert "UTC+0" in result
+
+
+def test_user_local_time_after_weekly_summary() -> None:
+    result = compose_instruction_prompt(
+        "Base.",
+        daily_content="Day 1.",
+        weekly_summary="Week 1.",
+        user_local_time="2026-06-07T14:30:00-05:00",
+    )
+    weekly_pos = result.index("[Previous week summary]")
+    time_pos = result.index("[User's Local Time]")
+    assert time_pos > weekly_pos
