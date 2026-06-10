@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 
 from fastapi import FastAPI
 from sqladmin import Admin, ModelView
@@ -32,7 +33,14 @@ _META_LABELS: dict[str, str] = {
     "texet_moderation_category": "Moderation Category",
     "texet_moderation_score": "Moderation Score",
     "texet_moderation_notice": "Moderation Notice",
+    "texet_generation": "Generation Snapshot",
 }
+
+
+def _fmt_meta_value(value: object) -> str:
+    if isinstance(value, dict | list):
+        return json.dumps(value, indent=2, sort_keys=True, default=str)
+    return str(value)
 
 
 def _fmt_meta_detail(m: object, a: str) -> str:
@@ -43,7 +51,7 @@ def _fmt_meta_detail(m: object, a: str) -> str:
     lines = []
     for k, val in v.items():
         label = _META_LABELS.get(k, k)
-        lines.append(f"{label}: {val}")
+        lines.append(f"{label}: {_fmt_meta_value(val)}")
     return "\n".join(lines)
 
 

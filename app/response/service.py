@@ -123,6 +123,36 @@ async def _generate_reply(
     return cast(str, reply.text)
 
 
+def _build_generation_snapshot(
+    chat_history: list[ChatMessage],
+    query: str,
+    system_prompt: str,
+    *,
+    provider: str,
+    model_id: str,
+    week_start: datetime.date,
+    day_number: int | None,
+    user_local_time: str | None,
+) -> dict[str, Any]:
+    return {
+        "version": 1,
+        "provider": provider,
+        "model_id": model_id,
+        "system_prompt": system_prompt,
+        "chat_history": [
+            {
+                "role": msg.role.value,
+                "content": msg.content if isinstance(msg.content, str) else str(msg.content),
+            }
+            for msg in chat_history
+        ],
+        "query": query,
+        "week_start": week_start.isoformat(),
+        "day_number": day_number,
+        "user_local_time": user_local_time,
+    }
+
+
 async def _send_sms(
     user_id: str,
     message: str,
@@ -530,6 +560,16 @@ async def _process_queued_reply(
         exclude_utterance_id=user_utterance.id,
         since_timestamp=week_start_dt,
     )
+    generation_snapshot = _build_generation_snapshot(
+        chat_history,
+        user_utterance.text,
+        system_prompt,
+        provider=provider,
+        model_id=model_id,
+        week_start=current_week_start,
+        day_number=day_number,
+        user_local_time=user_local_time,
+    )
 
     reply_text = await _generate_reply(
         chat_history, user_utterance.text, system_prompt, provider=provider, model_id=model_id
@@ -547,6 +587,7 @@ async def _process_queued_reply(
             final_status=UTTERANCE_STATUS_MODERATED,
             in_reply_to_utterance_id=user_utterance.id,
             meta_updates={
+                "texet_generation": generation_snapshot,
                 "texet_moderation_source": "bot",
                 "texet_moderation_category": blocked_category,
                 "texet_moderation_score": blocked_score,
@@ -563,6 +604,7 @@ async def _process_queued_reply(
         delivered_text=reply_text,
         final_status=UTTERANCE_STATUS_SENT,
         in_reply_to_utterance_id=user_utterance.id,
+        meta_updates={"texet_generation": generation_snapshot},
     )
 
 

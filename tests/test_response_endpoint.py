@@ -589,7 +589,18 @@ async def test_response_moderates_generated_reply_and_persists_raw_output(
     bot_utterance = bot_result.scalar_one()
     assert bot_utterance.status == UTTERANCE_STATUS_MODERATED
     assert bot_utterance.text == raw_reply
-    assert bot_utterance.meta == {
+    assert bot_utterance.meta is not None
+    assert bot_utterance.meta["texet_generation"]["query"] == "hello"
+    assert bot_utterance.meta["texet_generation"]["chat_history"] == []
+    assert {
+        key: bot_utterance.meta[key]
+        for key in (
+            "texet_moderation_source",
+            "texet_moderation_category",
+            "texet_moderation_score",
+            "texet_moderation_notice",
+        )
+    } == {
         "texet_moderation_source": "bot",
         "texet_moderation_category": "violence",
         "texet_moderation_score": 0.91,

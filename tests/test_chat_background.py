@@ -330,7 +330,18 @@ async def test_run_deferred_reply_moderates_generated_reply_and_sends_notice(
     assert refreshed is not None
     assert refreshed.status == UTTERANCE_STATUS_MODERATED
     assert refreshed.text == raw_reply
-    assert refreshed.meta == {
+    assert refreshed.meta is not None
+    assert refreshed.meta["texet_generation"]["query"] == "hi"
+    assert refreshed.meta["texet_generation"]["chat_history"] == []
+    assert {
+        key: refreshed.meta[key]
+        for key in (
+            "texet_moderation_source",
+            "texet_moderation_category",
+            "texet_moderation_score",
+            "texet_moderation_notice",
+        )
+    } == {
         "texet_moderation_source": "bot",
         "texet_moderation_category": "violence",
         "texet_moderation_score": 0.91,

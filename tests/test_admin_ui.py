@@ -7,7 +7,7 @@ from httpx import ASGITransport, AsyncClient
 from sqladmin.filters import OperationColumnFilter
 
 from app.console import init_console
-from app.console.admin_ui import UtteranceAdmin
+from app.console.admin_ui import UtteranceAdmin, _fmt_meta_detail
 from app.db import get_engine
 
 
@@ -75,3 +75,22 @@ def test_utterance_admin_has_user_filter_and_timestamp_default_sort() -> None:
         and getattr(filter_config, "parameter_name", None) == "speaker_id"
         for filter_config in UtteranceAdmin.column_filters
     )
+
+
+def test_utterance_admin_detail_shows_generation_snapshot() -> None:
+    class Row:
+        meta = {
+            "texet_generation": {
+                "provider": "bedrock",
+                "model_id": "us.anthropic.claude-sonnet-4-6",
+                "query": "What should I do next?",
+                "chat_history": [{"role": "user", "content": "hello"}],
+            }
+        }
+
+    rendered = _fmt_meta_detail(Row(), "meta")
+
+    assert "Generation Snapshot:" in rendered
+    assert '"provider": "bedrock"' in rendered
+    assert '"chat_history"' in rendered
+    assert '"query": "What should I do next?"' in rendered
