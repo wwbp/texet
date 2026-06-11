@@ -133,7 +133,7 @@ def _build_generation_snapshot(
     user_local_time: str | None,
 ) -> dict[str, Any]:
     return {
-        "version": 1,
+        "version": 2,
         "provider": provider,
         "model_id": model_id,
         "system_prompt": system_prompt,
@@ -545,6 +545,7 @@ async def _process_queued_reply(
         up_to_timestamp=user_utterance.timestamp,
         exclude_utterance_id=user_utterance.id,
         since_timestamp=week_start_dt,
+        annotate_days=True,
     )
     generation_snapshot = _build_generation_snapshot(
         chat_history,

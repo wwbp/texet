@@ -25,6 +25,7 @@ from app.models.response import (
     Utterance,
     WeeklySummary,
 )
+from app.response.utils import day_marker, extract_utc_offset
 
 DEFAULT_SYSTEM_PROMPT = "you are a helpful assistant."
 
@@ -143,6 +144,13 @@ async def get_or_create_system_prompt(session: AsyncSession) -> str:
     return value
 
 
+def _local_date(
+    timestamp: datetime.datetime, offset: datetime.timedelta | None
+) -> datetime.date:
+    tz = datetime.timezone(offset) if offset is not None else datetime.UTC
+    return timestamp.astimezone(tz).date()
+
+
 async def build_chat_history(
     session: AsyncSession,
     conversation_id: str,
@@ -150,6 +158,7 @@ async def build_chat_history(
     up_to_timestamp: datetime.datetime,
     exclude_utterance_id: str | None = None,
     since_timestamp: datetime.datetime | None = None,
+    annotate_days: bool = False,
 ) -> list[ChatMessage]:
     conditions = [
         Utterance.conversation_id == conversation_id,
@@ -163,10 +172,10 @@ async def build_chat_history(
     utterances = result.scalars().all()
 
     bot_id = bot_speaker_id(user_id)
-    chat_history: list[ChatMessage] = []
     # Fidelity rule: the history mirrors what was actually exchanged over SMS.
     # Bot messages count only once delivered (sent); moderated exchanges are
     # withheld on both sides.
+    included: list[Utterance] = []
     for utterance in utterances:
         if exclude_utterance_id and utterance.id == exclude_utterance_id:
             continue
@@ -175,11 +184,30 @@ async def build_chat_history(
         if utterance.speaker_id == bot_id:
             if utterance.status != UTTERANCE_STATUS_SENT:
                 continue
-            chat_history.append(ChatMessage.assistant(utterance.text))
+        elif utterance.status == UTTERANCE_STATUS_MODERATED:
+            continue
+        included.append(utterance)
+
+    # Leading messages without an offset of their own use the first known
+    # one, so the whole history shares the user's timezone where possible.
+    offset = next(
+        (o for o in (extract_utc_offset(u.meta) for u in included) if o is not None),
+        None,
+    )
+    previous_date: datetime.date | None = None
+    chat_history: list[ChatMessage] = []
+    for utterance in included:
+        text = utterance.text
+        if annotate_days:
+            offset = extract_utc_offset(utterance.meta) or offset
+            local_date = _local_date(utterance.timestamp, offset)
+            if local_date != previous_date:
+                text = f"{day_marker(local_date)}\n{text}"
+                previous_date = local_date
+        if utterance.speaker_id == bot_id:
+            chat_history.append(ChatMessage.assistant(text))
         else:
-            if utterance.status == UTTERANCE_STATUS_MODERATED:
-                continue
-            chat_history.append(ChatMessage.user(utterance.text))
+            chat_history.append(ChatMessage.user(text))
     return chat_history
 
 

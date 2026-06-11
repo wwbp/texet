@@ -27,8 +27,15 @@ from app.response.crud import (
     get_or_create_conversation,
     get_or_create_speaker,
 )
+from app.response.prompt import compose_instruction_prompt
+from app.response.utils import day_marker
 
 API_KEY = "test-api-key"
+
+
+def _today_marker() -> str:
+    """Day marker for messages created 'now' with no user timezone (UTC fallback)."""
+    return day_marker(datetime.datetime.now(datetime.UTC).date())
 
 
 @pytest.fixture()
@@ -267,9 +274,12 @@ async def test_response_success_persists(
         {"user_id": "u1", "message": "reply:hello", "utterance_id": first_body["id"], "in_reply_to_utterance_id": first_body["user_utterance_id"]},
         {"user_id": "u1", "message": "reply:again", "utterance_id": second_body["id"], "in_reply_to_utterance_id": second_body["user_utterance_id"]},
     ]
-    assert kani_stub[-1]["system_prompt"] == DEFAULT_SYSTEM_PROMPT
+    assert kani_stub[-1]["system_prompt"] == compose_instruction_prompt(DEFAULT_SYSTEM_PROMPT)
     assert kani_stub[0]["history"] == []
-    assert kani_stub[1]["history"] == [("user", "hello"), ("assistant", "reply:hello")]
+    assert kani_stub[1]["history"] == [
+        ("user", f"{_today_marker()}\nhello"),
+        ("assistant", "reply:hello"),
+    ]
 
     async_session.expire_all()
     speaker_count = await async_session.execute(select(func.count()).select_from(Speaker))
@@ -334,7 +344,8 @@ async def test_response_reuses_existing_conversation_history(
     assert body["conversation_id"] == conversation.id
 
     last = kani_stub[-1]
-    assert last["history"] == [("user", "hello"), ("assistant", "hi")]
+    seeded_marker = day_marker(base.astimezone(datetime.UTC).date())
+    assert last["history"] == [("user", f"{seeded_marker}\nhello"), ("assistant", "hi")]
 
 
 @pytest.mark.asyncio
@@ -714,9 +725,10 @@ async def test_response_single_conversation_across_day_numbers(
     conversations = result.scalars().all()
     assert len(conversations) == 1
 
-    # The day-2 generation must see day 1's exchange in its chat history.
+    # The day-2 generation must see day 1's exchange in its chat history
+    # (day markers may prefix the text).
     day2_history = kani_stub[1]["history"]
-    assert ("user", "day one") in day2_history
+    assert any(role == "user" and "day one" in text for role, text in day2_history)
     assert ("assistant", "reply:day one") in day2_history
     assert kani_stub[2]["history_len"] == 4
 
@@ -787,7 +799,7 @@ async def test_initial_message_included_in_history_not_system_prompt(
     assert response.status_code == 202
 
     assert len(kani_stub) == 1
-    assert kani_stub[0]["history"] == [("assistant", "Hello, welcome!")]
+    assert kani_stub[0]["history"] == [("assistant", f"{_today_marker()}\nHello, welcome!")]
     assert "Hello, welcome!" not in str(kani_stub[0]["system_prompt"])
 
 

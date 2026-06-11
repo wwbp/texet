@@ -293,4 +293,5 @@ async def test_user_local_time_absent_excluded_from_prompt(
         "u-ult-absent", user_utterance.id, bot_utterance.id, sessionmaker
     )
 
-    assert "[User's Local Time]" not in str(captured.get("system_prompt"))
+    # The conventions section mentions the label; check the section itself is absent.
+    assert "The user's current local time is" not in str(captured.get("system_prompt"))

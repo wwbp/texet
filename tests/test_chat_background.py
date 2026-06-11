@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 from types import SimpleNamespace
 
 import pytest
@@ -22,6 +23,8 @@ from app.response.crud import (
     get_or_create_conversation,
     get_or_create_speaker,
 )
+from app.response.prompt import compose_instruction_prompt
+from app.response.utils import day_marker
 
 
 def _sessionmaker_from(session: AsyncSession) -> async_sessionmaker[AsyncSession]:
@@ -412,12 +415,14 @@ async def test_drain_user_queue_processes_same_user_in_sequence(
     sessionmaker = _sessionmaker_from(async_session)
     await response_service._drain_user_queue("u-bg-queue", sessionmaker)
 
+    expected_system_prompt = compose_instruction_prompt(DEFAULT_SYSTEM_PROMPT)
+    today_marker = day_marker(datetime.datetime.now(datetime.UTC).date())
     assert calls == [
-        {"query": "one", "history": [], "system_prompt": DEFAULT_SYSTEM_PROMPT},
+        {"query": "one", "history": [], "system_prompt": expected_system_prompt},
         {
             "query": "two",
-            "history": [("user", "one"), ("assistant", "reply:one")],
-            "system_prompt": DEFAULT_SYSTEM_PROMPT,
+            "history": [("user", f"{today_marker}\none"), ("assistant", "reply:one")],
+            "system_prompt": expected_system_prompt,
         },
     ]
 
@@ -748,10 +753,12 @@ async def test_initial_bot_message_included_in_history_not_prompt(
     assert refreshed.status == UTTERANCE_STATUS_SENT
     assert refreshed.error is None
 
-    # The opening appears in history exactly as the user saw it, assistant-first.
+    # The opening appears in history exactly as the user saw it, assistant-first
+    # (prefixed with the day marker since it starts the day).
+    today_marker = day_marker(datetime.datetime.now(datetime.UTC).date())
     history = captured.get("chat_history", [])
     assert [(msg.role, msg.content) for msg in history] == [
-        (ChatRole.ASSISTANT, opening_text),
+        (ChatRole.ASSISTANT, f"{today_marker}\n{opening_text}"),
     ]
 
     # And it is no longer duplicated into the system prompt.

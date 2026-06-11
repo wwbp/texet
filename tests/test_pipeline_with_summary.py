@@ -17,7 +17,7 @@ from app.response.crud import (
     upsert_weekly_summary,
 )
 from app.response.prompt import compose_instruction_prompt
-from app.response.utils import week_start_utc
+from app.response.utils import day_marker, week_start_utc
 
 
 def _sessionmaker_from(session: AsyncSession) -> async_sessionmaker[AsyncSession]:
@@ -121,7 +121,9 @@ async def test_pipeline_uses_base_prompt_when_no_summary(
 
     system_prompt = captured["system_prompt"]
     assert isinstance(system_prompt, str)
-    assert "[Previous week summary]" not in system_prompt
+    # The conventions section mentions the label mid-sentence; the real
+    # summary section is the label followed by a newline.
+    assert "[Previous week summary]\n" not in system_prompt
 
 
 @pytest.mark.asyncio
@@ -193,8 +195,8 @@ async def test_pipeline_chat_history_limited_to_current_week(
     )
 
     history_texts = [text for _role, text in captured.get("history", [])]
-    assert "this week message" in history_texts
-    assert "last week message" not in history_texts
+    assert any("this week message" in text for text in history_texts)
+    assert not any("last week message" in text for text in history_texts)
 
 
 @pytest.mark.asyncio
@@ -328,8 +330,11 @@ async def test_pipeline_passes_complete_prompt_current_week_history_and_latest_q
     assert captured["query"] == current_query
     # The hub opening is timestamped last week, so the weekly window keeps it
     # out of history even though hub openings are no longer filtered by flag.
+    # Neither in-window utterance carries a user_local_time, so the day
+    # marker falls back to the UTC date.
+    history_marker = day_marker(this_week_ts.date())
     assert captured["history"] == [
-        ("user", "this week user turn"),
+        ("user", f"{history_marker}\nthis week user turn"),
         ("assistant", "this week assistant turn"),
     ]
     expected_system_prompt = compose_instruction_prompt(
@@ -339,12 +344,12 @@ async def test_pipeline_passes_complete_prompt_current_week_history_and_latest_q
         user_local_time=user_local_time,
     )
     expected_snapshot = {
-        "version": 1,
+        "version": 2,
         "provider": "bedrock",
         "model_id": "us.anthropic.claude-sonnet-4-6",
         "system_prompt": expected_system_prompt,
         "chat_history": [
-            {"role": "user", "content": "this week user turn"},
+            {"role": "user", "content": f"{history_marker}\nthis week user turn"},
             {"role": "assistant", "content": "this week assistant turn"},
         ],
         "query": current_query,
