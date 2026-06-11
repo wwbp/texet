@@ -1,5 +1,7 @@
 import base64
 import os
+import re
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
@@ -95,11 +97,29 @@ def test_utterance_admin_detail_renders_collapsible_snapshot() -> None:
     # Dict values become a collapsible json-viewer component fed escaped JSON.
     assert isinstance(rendered, Markup)
     assert "/console/static/json_viewer.js" in rendered
-    assert "<json-viewer data=" in rendered
+    assert "<andypf-json-viewer data=" in rendered
     assert "Generation Snapshot" in rendered
     assert "&#34;provider&#34;: &#34;bedrock&#34;" in rendered
     # Scalar values stay as plain labelled lines.
     assert "Moderation Score:</strong> 0.42" in rendered
+
+
+def test_meta_formatter_tag_matches_vendored_custom_element() -> None:
+    """The emitted tag must be the one the vendored bundle registers — an
+    unknown tag silently renders as an empty element (prod regression)."""
+    bundle = (
+        Path(__file__).parent.parent / "app" / "console" / "static" / "json_viewer.js"
+    ).read_text()
+    match = re.search(r'customElements\.define\("([^"]+)"', bundle)
+    assert match, "vendored bundle no longer registers a custom element?"
+    tag = match.group(1)
+
+    class Row:
+        meta = {"texet_generation": {"query": "hi"}}
+
+    rendered = _fmt_meta_detail(Row(), "meta")
+    assert f"<{tag} " in rendered
+    assert f"</{tag}>" in rendered
 
 
 def test_meta_formatter_escapes_user_content() -> None:
