@@ -14,6 +14,7 @@ from app.config import (
     UTTERANCE_STATUS_MODERATED,
     UTTERANCE_STATUS_QUEUED,
     UTTERANCE_STATUS_RECEIVED,
+    UTTERANCE_STATUS_SENT,
     UTTERANCE_STATUSES,
 )
 from app.models.response import (
@@ -163,34 +164,23 @@ async def build_chat_history(
 
     bot_id = bot_speaker_id(user_id)
     chat_history: list[ChatMessage] = []
+    # Fidelity rule: the history mirrors what was actually exchanged over SMS.
+    # Bot messages count only once delivered (sent); moderated exchanges are
+    # withheld on both sides.
     for utterance in utterances:
         if exclude_utterance_id and utterance.id == exclude_utterance_id:
             continue
-        if utterance.status == UTTERANCE_STATUS_MODERATED:
-            continue
         if not utterance.text:
             continue
-        if utterance.meta and utterance.meta.get("texet_hub_initial"):
-            continue
         if utterance.speaker_id == bot_id:
+            if utterance.status != UTTERANCE_STATUS_SENT:
+                continue
             chat_history.append(ChatMessage.assistant(utterance.text))
         else:
+            if utterance.status == UTTERANCE_STATUS_MODERATED:
+                continue
             chat_history.append(ChatMessage.user(utterance.text))
     return chat_history
-
-
-async def get_opening_message(session: AsyncSession, conversation_id: str) -> str | None:
-    result = await session.execute(
-        select(Utterance)
-        .where(
-            Utterance.conversation_id == conversation_id,
-            Utterance.meta.contains({"texet_hub_initial": True}),
-        )
-        .order_by(Utterance.timestamp)
-        .limit(1)
-    )
-    utterance = result.scalar_one_or_none()
-    return utterance.text if utterance and utterance.text else None
 
 
 async def create_utterance(

@@ -326,13 +326,14 @@ async def test_pipeline_passes_complete_prompt_current_week_history_and_latest_q
     assert captured["provider"] == "bedrock"
     assert captured["model_id"] == "us.anthropic.claude-sonnet-4-6"
     assert captured["query"] == current_query
+    # The hub opening is timestamped last week, so the weekly window keeps it
+    # out of history even though hub openings are no longer filtered by flag.
     assert captured["history"] == [
         ("user", "this week user turn"),
         ("assistant", "this week assistant turn"),
     ]
     expected_system_prompt = compose_instruction_prompt(
         base_prompt,
-        opening_message=opening_message,
         daily_content=daily_content,
         weekly_summary=weekly_summary,
         user_local_time=user_local_time,

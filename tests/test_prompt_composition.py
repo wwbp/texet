@@ -64,34 +64,6 @@ def test_sections_whitespace_stripped() -> None:
     assert "[Previous week summary]\nWeek summary." in result
 
 
-def test_opening_message_included() -> None:
-    result = compose_instruction_prompt("Base.", opening_message="Hi! I'm your study buddy.")
-    assert result == "Base.\n\n[Opening message]\nHi! I'm your study buddy."
-
-
-def test_opening_message_none_excluded() -> None:
-    result = compose_instruction_prompt("Base.", opening_message=None)
-    assert "[Opening message]" not in result
-    assert result == "Base."
-
-
-def test_opening_message_empty_excluded() -> None:
-    result = compose_instruction_prompt("Base.", opening_message="   ")
-    assert "[Opening message]" not in result
-
-
-def test_opening_message_before_daily_and_weekly() -> None:
-    result = compose_instruction_prompt(
-        "Base.",
-        opening_message="Hello!",
-        daily_content="Day 1.",
-        weekly_summary="Week 1.",
-    )
-    assert result == (
-        "Base.\n\n[Opening message]\nHello!\n\n[Daily Activity]\nDay 1.\n\n[Previous week summary]\nWeek 1."
-    )
-
-
 def test_user_local_time_included() -> None:
     result = compose_instruction_prompt("Base.", user_local_time="2026-06-07T14:30:00-05:00")
     assert "[User's Local Time]" in result

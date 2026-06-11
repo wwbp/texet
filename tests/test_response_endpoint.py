@@ -316,6 +316,7 @@ async def test_response_reuses_existing_conversation_history(
             bot.id,
             "hi",
             reply_to_id=user_utterance.id,
+            status=UTTERANCE_STATUS_SENT,
         )
         # Timestamps must be within the current week so they are not
         # filtered out by the since_timestamp window in the pipeline.
@@ -759,12 +760,15 @@ async def test_initial_message_persisted_as_bot_utterance(
 
 
 @pytest.mark.asyncio
-async def test_initial_message_excluded_from_history_injected_into_system_prompt(
+async def test_initial_message_included_in_history_not_system_prompt(
     async_client: AsyncClient,
     async_session: AsyncSession,
     sms_outbox: list[dict[str, str]],
     kani_stub: list[dict[str, object]],
 ) -> None:
+    """Hub openings appear in chat history exactly as the user saw them.
+    Assistant-first ordering is handled at the Bedrock engine boundary
+    (normalize_converse_messages), not by hiding the message."""
     await async_client.post(
         "/response",
         headers={"Authorization": f"Bearer {API_KEY}"},
@@ -783,10 +787,8 @@ async def test_initial_message_excluded_from_history_injected_into_system_prompt
     assert response.status_code == 202
 
     assert len(kani_stub) == 1
-    # Initial bot message must not appear in the messages array (Bedrock requires user-first).
-    assert kani_stub[0]["history"] == []
-    # Instead it must be present in the system prompt for context.
-    assert "Hello, welcome!" in str(kani_stub[0]["system_prompt"])
+    assert kani_stub[0]["history"] == [("assistant", "Hello, welcome!")]
+    assert "Hello, welcome!" not in str(kani_stub[0]["system_prompt"])
 
 
 @pytest.mark.asyncio
