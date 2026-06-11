@@ -41,10 +41,16 @@ def compose_instruction_prompt(
     daily_content: str | None = None,
     weekly_summary: str | None = None,
     user_local_time: str | None = None,
+    day_number: int | None = None,
 ) -> str:
     parts = [base.strip()]
     if daily_content and daily_content.strip():
-        parts.append(f"[Daily Activity]\n{daily_content.strip()}")
+        label = (
+            f"[Today's Activity (Day {day_number})]"
+            if day_number is not None
+            else "[Today's Activity]"
+        )
+        parts.append(f"{label}\n{daily_content.strip()}")
     if weekly_summary and weekly_summary.strip():
         parts.append(f"[Previous week summary]\n{weekly_summary.strip()}")
     if user_local_time and user_local_time.strip():

@@ -86,7 +86,7 @@ async def test_daily_prompt_appended_when_day_number_matches(
         "u-dp-match", user_utterance.id, bot_utterance.id, sessionmaker
     )
 
-    assert "[Daily Activity]" in str(captured.get("system_prompt"))
+    assert "[Today's Activity (Day 5)]" in str(captured.get("system_prompt"))
     assert "Do breathing exercises." in str(captured.get("system_prompt"))
 
 
@@ -116,7 +116,7 @@ async def test_no_daily_prompt_when_identifier_unmatched(
         "u-dp-miss", user_utterance.id, bot_utterance.id, sessionmaker
     )
 
-    assert "[Daily Activity]" not in str(captured.get("system_prompt"))
+    assert "[Today's Activity" not in str(captured.get("system_prompt"))
 
 
 @pytest.mark.asyncio
@@ -144,7 +144,7 @@ async def test_no_daily_prompt_when_no_identifier_in_meta(
         "u-dp-nometa", user_utterance.id, bot_utterance.id, sessionmaker
     )
 
-    assert "[Daily Activity]" not in str(captured.get("system_prompt"))
+    assert "[Today's Activity" not in str(captured.get("system_prompt"))
     assert "Should not appear." not in str(captured.get("system_prompt"))
 
 
@@ -188,7 +188,7 @@ async def test_prompt_data_recorded_on_bot_utterance_not_conversation(
     assert bot_utt is not None
     assert bot_utt.meta is not None
     snapshot = bot_utt.meta["texet_generation"]
-    assert "[Daily Activity]" in snapshot["system_prompt"]
+    assert "[Today's Activity (Day 2)]" in snapshot["system_prompt"]
     assert snapshot["day_number"] == 2
 
 
@@ -200,7 +200,7 @@ async def test_compose_instruction_prompt_sections_order() -> None:
         weekly_summary="Summary of last week.",
     )
     base_pos = result.index("System base.")
-    daily_pos = result.index("[Daily Activity]")
+    daily_pos = result.index("[Today's Activity]")
     summary_pos = result.index("[Previous week summary]")
     assert base_pos < daily_pos < summary_pos
 

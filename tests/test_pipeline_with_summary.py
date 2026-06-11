@@ -342,6 +342,7 @@ async def test_pipeline_passes_complete_prompt_current_week_history_and_latest_q
         daily_content=daily_content,
         weekly_summary=weekly_summary,
         user_local_time=user_local_time,
+        day_number=7,
     )
     expected_snapshot = {
         "version": 2,

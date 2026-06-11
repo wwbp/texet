@@ -536,6 +536,7 @@ async def _process_queued_reply(
         daily_content=daily_content,
         weekly_summary=prev_summary,
         user_local_time=user_local_time,
+        day_number=day_number,
     )
 
     chat_history = await build_chat_history(

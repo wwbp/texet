@@ -12,7 +12,17 @@ def test_base_only() -> None:
 
 def test_base_with_daily() -> None:
     result = compose_instruction_prompt("Base.", daily_content="Do exercise today.")
-    assert result == _with_conventions("Base.\n\n[Daily Activity]\nDo exercise today.")
+    assert result == _with_conventions("Base.\n\n[Today's Activity]\nDo exercise today.")
+
+
+def test_daily_label_includes_day_number() -> None:
+    result = compose_instruction_prompt("Base.", daily_content="Joy day.", day_number=26)
+    assert result == _with_conventions("Base.\n\n[Today's Activity (Day 26)]\nJoy day.")
+
+
+def test_day_number_without_daily_content_ignored() -> None:
+    result = compose_instruction_prompt("Base.", day_number=26)
+    assert result == _with_conventions("Base.")
 
 
 def test_base_with_weekly_summary() -> None:
@@ -29,13 +39,13 @@ def test_base_with_all_sections() -> None:
         weekly_summary="Week 1 summary.",
     )
     assert result == _with_conventions(
-        "Base.\n\n[Daily Activity]\nDay 5 activity.\n\n[Previous week summary]\nWeek 1 summary."
+        "Base.\n\n[Today's Activity]\nDay 5 activity.\n\n[Previous week summary]\nWeek 1 summary."
     )
 
 
 def test_none_daily_excluded() -> None:
     result = compose_instruction_prompt("Base.", daily_content=None)
-    assert "[Daily Activity]" not in result
+    assert "[Today's Activity]" not in result
     assert result == _with_conventions("Base.")
 
 
@@ -46,7 +56,7 @@ def test_none_weekly_excluded() -> None:
 
 def test_empty_string_daily_excluded() -> None:
     result = compose_instruction_prompt("Base.", daily_content="   ")
-    assert "[Daily Activity]" not in result
+    assert "[Today's Activity]" not in result
 
 
 def test_empty_string_weekly_excluded() -> None:
@@ -66,7 +76,7 @@ def test_sections_whitespace_stripped() -> None:
         daily_content="  Day activity.  ",
         weekly_summary="  Week summary.  ",
     )
-    assert "[Daily Activity]\nDay activity." in result
+    assert "[Today's Activity]\nDay activity." in result
     assert "[Previous week summary]\nWeek summary." in result
 
 
