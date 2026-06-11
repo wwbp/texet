@@ -6,9 +6,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import (
     DEFAULT_TIMEZONE,
+    UTTERANCE_STATUS_FAILED,
     UTTERANCE_STATUS_MODERATED,
     UTTERANCE_STATUS_QUEUED,
     UTTERANCE_STATUS_RECEIVED,
+    UTTERANCE_STATUS_SENT,
 )
 from app.models.response import Conversation, SystemPrompt, Utterance
 from app.response.crud import (
@@ -242,6 +244,7 @@ async def test_build_chat_history_orders_roles_and_excludes(
         bot.id,
         "hi there",
         reply_to_id=first.id,
+        status=UTTERANCE_STATUS_SENT,
     )
     third = await create_utterance(
         async_session,
@@ -296,6 +299,7 @@ async def test_build_chat_history_filters_by_conversation(
         bot_one.id,
         "one-reply",
         reply_to_id=one_user.id,
+        status=UTTERANCE_STATUS_SENT,
     )
     two_user = await create_utterance(
         async_session,
@@ -309,6 +313,7 @@ async def test_build_chat_history_filters_by_conversation(
         bot_two.id,
         "two-reply",
         reply_to_id=two_user.id,
+        status=UTTERANCE_STATUS_SENT,
     )
 
     one_user.timestamp = base
@@ -401,6 +406,7 @@ async def test_build_chat_history_skips_moderated_utterances(
         bot.id,
         "safe reply",
         reply_to_id=first.id,
+        status=UTTERANCE_STATUS_SENT,
     )
     first.timestamp = base
     moderated_user.timestamp = base + datetime.timedelta(seconds=1)
@@ -418,4 +424,208 @@ async def test_build_chat_history_skips_moderated_utterances(
     assert [(msg.role.value, msg.content) for msg in history] == [
         ("user", "safe"),
         ("assistant", "safe reply"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_build_chat_history_includes_hub_initial_as_assistant(
+    async_session: AsyncSession,
+) -> None:
+    speaker = await get_or_create_speaker(async_session, "user-5", meta={"type": "user"})
+    bot = await get_or_create_bot_speaker(async_session, "user-5")
+    conversation = await create_conversation(async_session, speaker.id)
+    await async_session.commit()
+
+    base = datetime.datetime(2026, 1, 4, tzinfo=DEFAULT_TIMEZONE)
+    opening = await create_utterance(
+        async_session,
+        conversation.id,
+        bot.id,
+        "Daily check-in: how did you sleep?",
+        meta={"texet_hub_initial": True},
+        status=UTTERANCE_STATUS_SENT,
+    )
+    answer = await create_utterance(
+        async_session,
+        conversation.id,
+        speaker.id,
+        "Pretty well",
+    )
+    opening.timestamp = base
+    answer.timestamp = base + datetime.timedelta(seconds=1)
+    await async_session.commit()
+
+    history = await build_chat_history(
+        async_session,
+        conversation_id=conversation.id,
+        user_id="user-5",
+        up_to_timestamp=answer.timestamp,
+    )
+
+    assert [(msg.role.value, msg.content) for msg in history] == [
+        ("assistant", "Daily check-in: how did you sleep?"),
+        ("user", "Pretty well"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_build_chat_history_only_sent_bot_utterances(
+    async_session: AsyncSession,
+) -> None:
+    """Bot messages the user never received (failed, queued, received) are
+    excluded; only delivered (sent) ones appear."""
+    speaker = await get_or_create_speaker(async_session, "user-6", meta={"type": "user"})
+    bot = await get_or_create_bot_speaker(async_session, "user-6")
+    conversation = await create_conversation(async_session, speaker.id)
+    await async_session.commit()
+
+    base = datetime.datetime(2026, 1, 5, tzinfo=DEFAULT_TIMEZONE)
+    user_msg = await create_utterance(async_session, conversation.id, speaker.id, "hello")
+    sent_bot = await create_utterance(
+        async_session,
+        conversation.id,
+        bot.id,
+        "delivered reply",
+        reply_to_id=user_msg.id,
+        status=UTTERANCE_STATUS_SENT,
+    )
+    failed_bot = await create_utterance(
+        async_session,
+        conversation.id,
+        bot.id,
+        "undelivered reply",
+        status=UTTERANCE_STATUS_FAILED,
+    )
+    received_bot = await create_utterance(
+        async_session,
+        conversation.id,
+        bot.id,
+        "never finalized",
+        status=UTTERANCE_STATUS_RECEIVED,
+    )
+    user_msg.timestamp = base
+    sent_bot.timestamp = base + datetime.timedelta(seconds=1)
+    failed_bot.timestamp = base + datetime.timedelta(seconds=2)
+    received_bot.timestamp = base + datetime.timedelta(seconds=3)
+    await async_session.commit()
+
+    history = await build_chat_history(
+        async_session,
+        conversation_id=conversation.id,
+        user_id="user-6",
+        up_to_timestamp=received_bot.timestamp,
+    )
+
+    assert [(msg.role.value, msg.content) for msg in history] == [
+        ("user", "hello"),
+        ("assistant", "delivered reply"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_build_chat_history_day_markers_from_user_local_time(
+    async_session: AsyncSession,
+) -> None:
+    """A marker prefixes the first message of each user-local calendar day."""
+    speaker = await get_or_create_speaker(async_session, "user-7", meta={"type": "user"})
+    bot = await get_or_create_bot_speaker(async_session, "user-7")
+    conversation = await create_conversation(async_session, speaker.id)
+    await async_session.commit()
+
+    # UTC timestamps; the -5h offset shifts day boundaries.
+    monday_msg = await create_utterance(
+        async_session,
+        conversation.id,
+        speaker.id,
+        "monday morning",
+        meta={"user_local_time": "2026-01-05T09:00:00-05:00"},
+    )
+    monday_reply = await create_utterance(
+        async_session,
+        conversation.id,
+        bot.id,
+        "good morning",
+        status=UTTERANCE_STATUS_SENT,
+    )
+    tuesday_msg = await create_utterance(
+        async_session,
+        conversation.id,
+        speaker.id,
+        "tuesday evening",
+        meta={"user_local_time": "2026-01-06T19:00:00-05:00"},
+    )
+    monday_msg.timestamp = datetime.datetime(2026, 1, 5, 14, 0, tzinfo=datetime.UTC)
+    monday_reply.timestamp = datetime.datetime(2026, 1, 5, 14, 1, tzinfo=datetime.UTC)
+    tuesday_msg.timestamp = datetime.datetime(2026, 1, 7, 0, 0, tzinfo=datetime.UTC)
+    await async_session.commit()
+
+    history = await build_chat_history(
+        async_session,
+        conversation_id=conversation.id,
+        user_id="user-7",
+        up_to_timestamp=tuesday_msg.timestamp,
+        annotate_days=True,
+    )
+
+    # Jan 7 00:00 UTC is still Tuesday Jan 6 at UTC-5.
+    assert [(msg.role.value, msg.content) for msg in history] == [
+        ("user", "[Monday, January 5]\nmonday morning"),
+        ("assistant", "good morning"),
+        ("user", "[Tuesday, January 6]\ntuesday evening"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_build_chat_history_day_marker_offset_backfills_leading_messages(
+    async_session: AsyncSession,
+) -> None:
+    """A hub opening with no offset of its own uses the first known offset, and
+    without annotate_days no markers appear at all."""
+    speaker = await get_or_create_speaker(async_session, "user-8", meta={"type": "user"})
+    bot = await get_or_create_bot_speaker(async_session, "user-8")
+    conversation = await create_conversation(async_session, speaker.id)
+    await async_session.commit()
+
+    opening = await create_utterance(
+        async_session,
+        conversation.id,
+        bot.id,
+        "daily check-in",
+        meta={"texet_hub_initial": True},
+        status=UTTERANCE_STATUS_SENT,
+    )
+    answer = await create_utterance(
+        async_session,
+        conversation.id,
+        speaker.id,
+        "doing fine",
+        meta={"user_local_time": "2026-01-05T20:30:00-05:00"},
+    )
+    # 01:00 UTC on Jan 6 is still Jan 5 at the user's UTC-5 offset; without
+    # the backfill the opening would be marked a day ahead of the answer.
+    opening.timestamp = datetime.datetime(2026, 1, 6, 1, 0, tzinfo=datetime.UTC)
+    answer.timestamp = datetime.datetime(2026, 1, 6, 1, 30, tzinfo=datetime.UTC)
+    await async_session.commit()
+
+    annotated = await build_chat_history(
+        async_session,
+        conversation_id=conversation.id,
+        user_id="user-8",
+        up_to_timestamp=answer.timestamp,
+        annotate_days=True,
+    )
+    assert [(msg.role.value, msg.content) for msg in annotated] == [
+        ("assistant", "[Monday, January 5]\ndaily check-in"),
+        ("user", "doing fine"),
+    ]
+
+    plain = await build_chat_history(
+        async_session,
+        conversation_id=conversation.id,
+        user_id="user-8",
+        up_to_timestamp=answer.timestamp,
+    )
+    assert [(msg.role.value, msg.content) for msg in plain] == [
+        ("assistant", "daily check-in"),
+        ("user", "doing fine"),
     ]

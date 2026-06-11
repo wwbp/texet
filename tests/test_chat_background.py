@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 from types import SimpleNamespace
 
 import pytest
@@ -22,6 +23,8 @@ from app.response.crud import (
     get_or_create_conversation,
     get_or_create_speaker,
 )
+from app.response.prompt import compose_instruction_prompt
+from app.response.utils import day_marker
 
 
 def _sessionmaker_from(session: AsyncSession) -> async_sessionmaker[AsyncSession]:
@@ -412,12 +415,14 @@ async def test_drain_user_queue_processes_same_user_in_sequence(
     sessionmaker = _sessionmaker_from(async_session)
     await response_service._drain_user_queue("u-bg-queue", sessionmaker)
 
+    expected_system_prompt = compose_instruction_prompt(DEFAULT_SYSTEM_PROMPT)
+    today_marker = day_marker(datetime.datetime.now(datetime.UTC).date())
     assert calls == [
-        {"query": "one", "history": [], "system_prompt": DEFAULT_SYSTEM_PROMPT},
+        {"query": "one", "history": [], "system_prompt": expected_system_prompt},
         {
             "query": "two",
-            "history": [("user", "one"), ("assistant", "reply:one")],
-            "system_prompt": DEFAULT_SYSTEM_PROMPT,
+            "history": [("user", f"{today_marker}\none"), ("assistant", "reply:one")],
+            "system_prompt": expected_system_prompt,
         },
     ]
 
@@ -671,15 +676,14 @@ async def test_moderate_text_empty_results_returns_not_blocked(
 
 
 @pytest.mark.asyncio
-async def test_initial_bot_message_injected_into_prompt_not_history(
+async def test_initial_bot_message_included_in_history_not_prompt(
     async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Regression: initial bot message must not appear as the first messages-array turn.
-
-    When a conversation is seeded via the is_initial=True flow, the bot utterance is tagged
-    texet_hub_initial=True.  The fix excludes it from build_chat_history (so Bedrock never
-    sees an assistant-first conversation) and instead injects its text into the system prompt
-    via the [Opening message] section.
+    """Hub openings (texet_hub_initial=True) stay in chat history as assistant
+    messages so the LLM sees the same transcript as the user. Bedrock's
+    user-first/alternating-roles requirement is satisfied at the engine
+    boundary by normalize_converse_messages (see test_engines.py), so an
+    assistant-first history here is fine.
     """
     captured: dict[str, object] = {}
 
@@ -749,14 +753,14 @@ async def test_initial_bot_message_injected_into_prompt_not_history(
     assert refreshed.status == UTTERANCE_STATUS_SENT
     assert refreshed.error is None
 
-    # The history passed to the engine must not start with an assistant message.
+    # The opening appears in history exactly as the user saw it, assistant-first
+    # (prefixed with the day marker since it starts the day).
+    today_marker = day_marker(datetime.datetime.now(datetime.UTC).date())
     history = captured.get("chat_history", [])
-    assert not history or getattr(history[0], "role", None) != ChatRole.ASSISTANT, (
-        "history[0] is still ASSISTANT — initial bot message was not excluded from chat_history"
-    )
+    assert [(msg.role, msg.content) for msg in history] == [
+        (ChatRole.ASSISTANT, f"{today_marker}\n{opening_text}"),
+    ]
 
-    # The opening message must appear in the system prompt instead.
+    # And it is no longer duplicated into the system prompt.
     system_prompt = captured.get("system_prompt", "")
-    assert opening_text in str(system_prompt), (
-        "Opening message was not injected into the system prompt"
-    )
+    assert opening_text not in str(system_prompt)

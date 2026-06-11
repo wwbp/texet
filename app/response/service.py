@@ -49,7 +49,6 @@ from app.response.crud import (
     create_utterance,
     get_daily_prompt,
     get_latest_system_prompt,
-    get_opening_message,
     get_or_create_bot_speaker,
     get_or_create_conversation,
     get_or_create_speaker,
@@ -134,7 +133,7 @@ def _build_generation_snapshot(
     user_local_time: str | None,
 ) -> dict[str, Any]:
     return {
-        "version": 1,
+        "version": 2,
         "provider": provider,
         "model_id": model_id,
         "system_prompt": system_prompt,
@@ -532,13 +531,12 @@ async def _process_queued_reply(
     )
     daily_content = daily_prompt.content if daily_prompt else None
 
-    opening_message = await get_opening_message(session, user_utterance.conversation_id)
     system_prompt = compose_instruction_prompt(
         base=base_prompt,
         daily_content=daily_content,
         weekly_summary=prev_summary,
-        opening_message=opening_message,
         user_local_time=user_local_time,
+        day_number=day_number,
     )
 
     chat_history = await build_chat_history(
@@ -548,6 +546,7 @@ async def _process_queued_reply(
         up_to_timestamp=user_utterance.timestamp,
         exclude_utterance_id=user_utterance.id,
         since_timestamp=week_start_dt,
+        annotate_days=True,
     )
     generation_snapshot = _build_generation_snapshot(
         chat_history,
