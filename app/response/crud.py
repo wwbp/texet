@@ -68,13 +68,11 @@ async def create_conversation(
     session: AsyncSession,
     owner_speaker_id: str,
     status: str = "open",
-    day_number: int | None = None,
     meta: dict[str, Any] | None = None,
 ) -> Conversation:
     conversation = Conversation(
         owner_speaker_id=owner_speaker_id,
         status=status,
-        day_number=day_number,
         meta=meta,
     )
     session.add(conversation)
@@ -86,19 +84,12 @@ async def get_or_create_conversation(
     session: AsyncSession,
     owner_speaker_id: str,
     status: str = "open",
-    day_number: int | None = None,
     meta: dict[str, Any] | None = None,
 ) -> Conversation:
-    day_filter = (
-        Conversation.day_number == day_number
-        if day_number is not None
-        else Conversation.day_number.is_(None)
-    )
     result = await session.execute(
         select(Conversation).where(
             Conversation.owner_speaker_id == owner_speaker_id,
             Conversation.status == status,
-            day_filter,
         )
     )
     conversation = result.scalar_one_or_none()
@@ -110,7 +101,6 @@ async def get_or_create_conversation(
             conversation = Conversation(
                 owner_speaker_id=owner_speaker_id,
                 status=status,
-                day_number=day_number,
                 meta=meta,
             )
             session.add(conversation)
@@ -123,7 +113,6 @@ async def get_or_create_conversation(
         select(Conversation).where(
             Conversation.owner_speaker_id == owner_speaker_id,
             Conversation.status == status,
-            day_filter,
         )
     )
     conversation = result.scalar_one_or_none()

@@ -265,7 +265,7 @@ async def test_pipeline_passes_complete_prompt_current_week_history_and_latest_q
 
         speaker = await get_or_create_speaker(async_session, user_id, meta={"type": "user"})
         bot = await get_or_create_bot_speaker(async_session, user_id)
-        conversation = await get_or_create_conversation(async_session, speaker.id, day_number=7)
+        conversation = await get_or_create_conversation(async_session, speaker.id)
         await upsert_weekly_summary(async_session, user_id, prev_week_start, weekly_summary)
 
         opening_utt = await create_utterance(

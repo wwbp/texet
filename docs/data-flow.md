@@ -27,7 +27,7 @@
 | **SMS Hub** | External SMS platform that POSTs inbound messages to `/response` and receives outbound delivery via a webhook URL (`SMS_OUTBOUND_URL`) |
 | **Bearer token** | API key sent in `Authorization: Bearer <token>` header; stored as a SHA-256 hash in the DB, never in plaintext |
 | **Speaker** | A participant row in the DB — one per real user, plus a synthetic `bot:<user_id>` speaker per user |
-| **Conversation** | A container for an ordered set of Utterances; keyed by `owner_speaker_id` + `status=open` + optional `day_number`; at most one open conversation per user per day |
+| **Conversation** | A container for an ordered set of Utterances; keyed by `owner_speaker_id` + `status=open`; at most one open conversation per user, created on their first message and reused for all subsequent ones |
 | **Utterance** | A single message (user or bot) within a Conversation; has `status`, `text`, `speaker_id`, `reply_to_id`, `meta` (JSON), `timestamp` |
 | **Utterance status** | `queued` → bot reply placeholder; `received` → user message stored; `sent` → delivered to SMS Hub; `moderated` → blocked; `failed` → delivery error |
 | **get-or-create** | SELECT first; if not found, INSERT inside a savepoint; if race/IntegrityError, SELECT again — existing row is never modified |
@@ -178,6 +178,6 @@
 | 2 | **Per-user asyncio.Lock** — serializes replies per user so messages are processed in order; breaks under multiple server replicas |
 | 3 | **Two moderation passes** — user input (gate: blocked → crisis notice + alert email) then bot output (filter: blocked → store raw, deliver sanitized notice) |
 | 4 | **Dynamic system prompt** — assembled fresh per request from 4 sources: base prompt, opening message, daily content (by `day_number`), prior week's LLM summary |
-| 5 | **Chat history is weekly-windowed** — only utterances since the current week's Monday are sent to the LLM; prevents unbounded context growth |
+| 5 | **Chat history is weekly-windowed** — only utterances since the current week's Sunday (UTC) are sent to the LLM; prevents unbounded context growth |
 | 6 | **Weekly summary closes the loop** — scheduled job generates a summary that becomes injected context the following week |
 | 7 | **Initial message shortcut** — `is_initial: true` bypasses the full pipeline; just persists the hub's pre-written opener as `SENT` |

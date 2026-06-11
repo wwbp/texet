@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker
 
-from app.models.response import Conversation, DailyPrompt
+from app.models.response import Conversation, DailyPrompt, Utterance
 from app.response import service as response_service
 from app.response.crud import (
     create_queued_utterance,
@@ -149,7 +149,7 @@ async def test_no_daily_prompt_when_no_identifier_in_meta(
 
 
 @pytest.mark.asyncio
-async def test_instruction_prompt_saved_to_conversation_meta(
+async def test_prompt_data_recorded_on_bot_utterance_not_conversation(
     async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _stub_pass_through(monkeypatch)
@@ -172,50 +172,24 @@ async def test_instruction_prompt_saved_to_conversation_meta(
         bot_utterance = await create_queued_utterance(
             async_session, conversation.id, bot.id, reply_to_id=user_utterance.id
         )
+        bot_utt_id = bot_utterance.id
 
     sessionmaker = _sessionmaker_from(async_session)
     await response_service._run_deferred_reply(
-        "u-dp-meta", user_utterance.id, bot_utterance.id, sessionmaker
+        "u-dp-meta", user_utterance.id, bot_utt_id, sessionmaker
     )
 
     async_session.expire_all()
     conv = await async_session.get(Conversation, conv_id)
     assert conv is not None
-    assert conv.meta is not None
-    assert "texet_instruction_prompt" in conv.meta
-    assert "[Daily Activity]" in conv.meta["texet_instruction_prompt"]
-    assert conv.meta.get("texet_day_number") == 2
+    assert conv.meta is None
 
-
-@pytest.mark.asyncio
-async def test_instruction_prompt_saved_without_day_number(
-    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _stub_pass_through(monkeypatch)
-
-    async with async_session.begin():
-        speaker = await get_or_create_speaker(async_session, "u-dp-base", meta={"type": "user"})
-        bot = await get_or_create_bot_speaker(async_session, "u-dp-base")
-        conversation = await get_or_create_conversation(async_session, speaker.id)
-        conv_id = conversation.id
-        user_utterance = await create_utterance(
-            async_session, conversation.id, speaker.id, "hi", meta=None
-        )
-        bot_utterance = await create_queued_utterance(
-            async_session, conversation.id, bot.id, reply_to_id=user_utterance.id
-        )
-
-    sessionmaker = _sessionmaker_from(async_session)
-    await response_service._run_deferred_reply(
-        "u-dp-base", user_utterance.id, bot_utterance.id, sessionmaker
-    )
-
-    async_session.expire_all()
-    conv = await async_session.get(Conversation, conv_id)
-    assert conv is not None
-    assert conv.meta is not None
-    assert "texet_instruction_prompt" in conv.meta
-    assert "texet_day_number" not in conv.meta
+    bot_utt = await async_session.get(Utterance, bot_utt_id)
+    assert bot_utt is not None
+    assert bot_utt.meta is not None
+    snapshot = bot_utt.meta["texet_generation"]
+    assert "[Daily Activity]" in snapshot["system_prompt"]
+    assert snapshot["day_number"] == 2
 
 
 @pytest.mark.asyncio
@@ -263,7 +237,7 @@ async def test_user_local_time_in_system_prompt(
 
 
 @pytest.mark.asyncio
-async def test_user_local_time_stored_in_conversation_meta(
+async def test_user_local_time_recorded_in_generation_snapshot(
     async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _stub_pass_through(monkeypatch)
@@ -272,7 +246,6 @@ async def test_user_local_time_stored_in_conversation_meta(
         speaker = await get_or_create_speaker(async_session, "u-ult-meta", meta={"type": "user"})
         bot = await get_or_create_bot_speaker(async_session, "u-ult-meta")
         conversation = await get_or_create_conversation(async_session, speaker.id)
-        conv_id = conversation.id
         user_utterance = await create_utterance(
             async_session,
             conversation.id,
@@ -283,17 +256,19 @@ async def test_user_local_time_stored_in_conversation_meta(
         bot_utterance = await create_queued_utterance(
             async_session, conversation.id, bot.id, reply_to_id=user_utterance.id
         )
+        bot_utt_id = bot_utterance.id
 
     sessionmaker = _sessionmaker_from(async_session)
     await response_service._run_deferred_reply(
-        "u-ult-meta", user_utterance.id, bot_utterance.id, sessionmaker
+        "u-ult-meta", user_utterance.id, bot_utt_id, sessionmaker
     )
 
     async_session.expire_all()
-    conv = await async_session.get(Conversation, conv_id)
-    assert conv is not None
-    assert conv.meta is not None
-    assert conv.meta.get("texet_user_local_time") == "2026-06-07T14:30:00-05:00"
+    bot_utt = await async_session.get(Utterance, bot_utt_id)
+    assert bot_utt is not None
+    assert bot_utt.meta is not None
+    snapshot = bot_utt.meta["texet_generation"]
+    assert snapshot["user_local_time"] == "2026-06-07T14:30:00-05:00"
 
 
 @pytest.mark.asyncio

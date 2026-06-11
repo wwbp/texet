@@ -41,7 +41,7 @@ from app.config import (
 )
 from app.db import get_sessionmaker
 from app.engines.factory import create_engine as _create_engine
-from app.models.response import Conversation, Utterance
+from app.models.response import Utterance
 from app.response.crud import (
     bot_speaker_id,
     build_chat_history,
@@ -108,8 +108,7 @@ async def _generate_reply(
     model_id: str = "gpt-4o-mini",
 ) -> str:
     engine = _create_engine(provider, model_id)
-    kani = Kani(engine=engine, system_prompt=system_prompt)
-    kani.chat_history = chat_history
+    kani = Kani(engine=engine, system_prompt=system_prompt, chat_history=chat_history)
 
     try:
         reply = await kani.chat_round(query)
@@ -542,16 +541,6 @@ async def _process_queued_reply(
         user_local_time=user_local_time,
     )
 
-    conversation = await session.get(Conversation, user_utterance.conversation_id)
-    if conversation is not None:
-        prompt_meta: dict[str, Any] = {"texet_instruction_prompt": system_prompt}
-        if day_number is not None:
-            prompt_meta["texet_day_number"] = day_number
-        if user_local_time is not None:
-            prompt_meta["texet_user_local_time"] = user_local_time
-        conversation.meta = _merge_meta(conversation.meta, prompt_meta)
-        await session.flush()
-
     chat_history = await build_chat_history(
         session,
         conversation_id=user_utterance.conversation_id,
@@ -655,19 +644,11 @@ async def process_chat(
     background_tasks: BackgroundTasks,
     meta: dict[str, Any] | None = None,
 ) -> ChatQueuedResponse:
-    day_number: int | None = None
-    if meta:
-        raw = meta.get("day_number")
-        if isinstance(raw, int):
-            day_number = raw
-
     async with session.begin():
         speaker = await get_or_create_speaker(session, payload.user_id, meta={"type": "user"})
         bot = await get_or_create_bot_speaker(session, payload.user_id)
 
-        conversation = await get_or_create_conversation(
-            session, speaker.id, day_number=day_number
-        )
+        conversation = await get_or_create_conversation(session, speaker.id)
 
         user_utterance = await create_utterance(
             session,
@@ -713,19 +694,11 @@ async def _persist_initial_bot_message(
     session: AsyncSession,
     payload: ResponseRequest,
 ) -> ResponseQueuedResponse:
-    metadata = payload.metadata or {}
-    day_number: int | None = None
-    raw = metadata.get("day_number")
-    if isinstance(raw, int):
-        day_number = raw
-
     async with session.begin():
         speaker = await get_or_create_speaker(session, payload.user_id, meta={"type": "user"})
         bot = await get_or_create_bot_speaker(session, payload.user_id)
 
-        conversation = await get_or_create_conversation(
-            session, speaker.id, day_number=day_number
-        )
+        conversation = await get_or_create_conversation(session, speaker.id)
 
         bot_utterance = await create_utterance(
             session,

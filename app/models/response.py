@@ -33,20 +33,12 @@ class Speaker(Base):
 class Conversation(Base):
     __tablename__ = "conversations"
     __table_args__ = (
-        # One open conversation per speaker when no day is set.
+        # One open conversation per speaker.
         Index(
-            "ux_conversations_owner_open_no_day",
+            "ux_conversations_owner_open",
             "owner_speaker_id",
             unique=True,
-            postgresql_where=text("status = 'open' AND day_number IS NULL"),
-        ),
-        # One open conversation per (speaker, day) when a day is set.
-        Index(
-            "ux_conversations_owner_open_day",
-            "owner_speaker_id",
-            "day_number",
-            unique=True,
-            postgresql_where=text("status = 'open' AND day_number IS NOT NULL"),
+            postgresql_where=text("status = 'open'"),
         ),
     )
 
@@ -54,7 +46,6 @@ class Conversation(Base):
     owner_speaker_id: Mapped[str] = mapped_column(
         String(128), ForeignKey("speakers.id"), nullable=False
     )
-    day_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="open")
     last_activity_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True),
