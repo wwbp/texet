@@ -4,6 +4,7 @@ import os
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from markupsafe import Markup
 from sqladmin.filters import OperationColumnFilter
 
 from app.console import init_console
@@ -77,7 +78,7 @@ def test_utterance_admin_has_user_filter_and_timestamp_default_sort() -> None:
     )
 
 
-def test_utterance_admin_detail_shows_generation_snapshot() -> None:
+def test_utterance_admin_detail_renders_collapsible_snapshot() -> None:
     class Row:
         meta = {
             "texet_generation": {
@@ -85,12 +86,41 @@ def test_utterance_admin_detail_shows_generation_snapshot() -> None:
                 "model_id": "us.anthropic.claude-sonnet-4-6",
                 "query": "What should I do next?",
                 "chat_history": [{"role": "user", "content": "hello"}],
-            }
+            },
+            "texet_moderation_score": 0.42,
         }
 
     rendered = _fmt_meta_detail(Row(), "meta")
 
-    assert "Generation Snapshot:" in rendered
-    assert '"provider": "bedrock"' in rendered
-    assert '"chat_history"' in rendered
-    assert '"query": "What should I do next?"' in rendered
+    # Dict values become a collapsible json-viewer component fed escaped JSON.
+    assert isinstance(rendered, Markup)
+    assert "/console/static/json_viewer.js" in rendered
+    assert "<json-viewer data=" in rendered
+    assert "Generation Snapshot" in rendered
+    assert "&#34;provider&#34;: &#34;bedrock&#34;" in rendered
+    # Scalar values stay as plain labelled lines.
+    assert "Moderation Score:</strong> 0.42" in rendered
+
+
+def test_meta_formatter_escapes_user_content() -> None:
+    class Row:
+        meta = {"texet_generation": {"query": '<script>alert("xss")</script>'}}
+
+    rendered = _fmt_meta_detail(Row(), "meta")
+
+    assert "<script>alert" not in rendered
+    assert "json_viewer.js" in rendered  # the only script is the vendored viewer
+
+
+def test_meta_formatter_empty_meta() -> None:
+    class Row:
+        meta = None
+
+    assert _fmt_meta_detail(Row(), "meta") == "—"
+
+
+@pytest.mark.asyncio
+async def test_console_static_serves_json_viewer(admin_ui_client: AsyncClient) -> None:
+    response = await admin_ui_client.get("/console/static/json_viewer.js")
+    assert response.status_code == 200
+    assert "javascript" in response.headers["content-type"]

@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import inspect
 import json
+from pathlib import Path
 
 from fastapi import FastAPI
+from markupsafe import Markup
 from sqladmin import Admin, ModelView
 from sqladmin.authentication import AuthenticationBackend
 from sqladmin.filters import (
@@ -12,6 +14,7 @@ from sqladmin.filters import (
     StaticValuesFilter,
 )
 from starlette.requests import Request
+from starlette.staticfiles import StaticFiles
 
 from app.config import CONSOLE_PREFIX, UTTERANCE_STATUSES, admin_enabled, get_admin_secret_key
 from app.console.core import _authorized, _credentials_valid, _now
@@ -35,22 +38,31 @@ _META_LABELS: dict[str, str] = {
 }
 
 
-def _fmt_meta_value(value: object) -> str:
-    if isinstance(value, dict | list):
-        return json.dumps(value, indent=2, sort_keys=True, default=str)
-    return str(value)
+_JSON_VIEWER_SCRIPT = Markup(
+    f'<script src="{CONSOLE_PREFIX}/static/json_viewer.js" defer></script>'
+)
 
 
-def _fmt_meta_detail(m: object, a: str) -> str:
-    """Render JSONB meta as labelled key: value lines. No truncation — detail view shows all."""
+def _fmt_meta_detail(m: object, a: str) -> Markup:
+    """Render JSONB meta as labelled values; dict/list values get a collapsible
+    JSON tree (the vendored @andypf/json-viewer web component)."""
     v = getattr(m, a, None)
     if not v:
-        return "—"
-    lines = []
+        return Markup("—")
+    blocks = [_JSON_VIEWER_SCRIPT]
     for k, val in v.items():
         label = _META_LABELS.get(k, k)
-        lines.append(f"{label}: {_fmt_meta_value(val)}")
-    return "\n".join(lines)
+        if isinstance(val, dict | list):
+            payload = json.dumps(val, sort_keys=True, default=str)
+            blocks.append(
+                Markup(
+                    '<div><strong>{}</strong></div>'
+                    '<json-viewer data="{}" expanded="1" show-toolbar="true"></json-viewer>'
+                ).format(label, payload)
+            )
+        else:
+            blocks.append(Markup("<div><strong>{}:</strong> {}</div>").format(label, val))
+    return Markup("\n").join(blocks)
 
 
 def _fmt_text_truncated(m: object, a: str) -> str:
@@ -314,6 +326,7 @@ class AdminExportAdmin(ModelView, model=AdminExport):
         "completed_at",
         "meta",
     ]
+    column_formatters_detail = {"meta": _fmt_meta_detail}  # type: ignore[dict-item]
     column_labels = {
         "id": "Export ID",
         "range_start": "Start",
@@ -335,6 +348,12 @@ def init_console(app: FastAPI) -> None:
     secret_key = get_admin_secret_key()
     if not secret_key:
         return
+
+    app.mount(
+        f"{CONSOLE_PREFIX}/static",
+        StaticFiles(directory=Path(__file__).parent / "static"),
+        name="console_static",
+    )
 
     authentication_backend = AdminAuth(secret_key=secret_key)
     if "base_url" in inspect.signature(Admin).parameters:
