@@ -5,7 +5,11 @@ from unittest.mock import patch
 import pytest
 from kani.models import ChatMessage, ChatRole  # type: ignore[import-untyped]
 
-from app.engines.bedrock import BedrockEngine
+from app.engines.bedrock import (
+    _FIRST_TURN_PLACEHOLDER,
+    BedrockEngine,
+    normalize_converse_messages,
+)
 from app.engines.factory import create_engine
 
 # ---------------------------------------------------------------------------
@@ -113,6 +117,102 @@ async def test_bedrock_predict_no_system_prompt(bedrock_engine: BedrockEngine) -
 
     assert captured["system"] == []
     assert len(captured["messages"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# Converse message normalization tests
+# ---------------------------------------------------------------------------
+
+
+def _user(text: str) -> dict:
+    return {"role": "user", "content": [{"text": text}]}
+
+
+def _assistant(text: str) -> dict:
+    return {"role": "assistant", "content": [{"text": text}]}
+
+
+def _capture_call(engine: BedrockEngine, captured: dict) -> None:
+    def _fake_call(system_blocks: list, messages: list) -> dict:
+        captured["system"] = system_blocks
+        captured["messages"] = messages
+        return _make_bedrock_response("ok")
+
+    engine._call_bedrock = _fake_call  # type: ignore[method-assign]
+
+
+def test_normalize_noop_for_alternating_history() -> None:
+    conversation = [_user("a"), _assistant("b"), _user("c")]
+    assert normalize_converse_messages(conversation) == conversation
+
+
+def test_normalize_empty_input() -> None:
+    assert normalize_converse_messages([]) == []
+
+
+def test_normalize_merges_consecutive_user_messages() -> None:
+    result = normalize_converse_messages([_user("a"), _user("b"), _assistant("c")])
+    assert result == [_user("a\n\nb"), _assistant("c")]
+
+
+def test_normalize_merges_consecutive_assistant_messages() -> None:
+    result = normalize_converse_messages(
+        [_user("hi"), _assistant("opening one"), _assistant("opening two"), _user("reply")]
+    )
+    assert result == [_user("hi"), _assistant("opening one\n\nopening two"), _user("reply")]
+
+
+def test_normalize_prepends_placeholder_when_assistant_first() -> None:
+    result = normalize_converse_messages([_assistant("hello"), _user("hi")])
+    assert result == [_user(_FIRST_TURN_PLACEHOLDER), _assistant("hello"), _user("hi")]
+
+
+def test_normalize_assistant_first_and_consecutive() -> None:
+    """Merging happens before the placeholder is prepended, so the placeholder
+    never merges into a following user message."""
+    result = normalize_converse_messages([_assistant("a"), _assistant("b"), _user("c")])
+    assert result == [_user(_FIRST_TURN_PLACEHOLDER), _assistant("a\n\nb"), _user("c")]
+
+
+def test_normalize_drops_empty_messages() -> None:
+    result = normalize_converse_messages([_user(""), _assistant("   "), _user("hello")])
+    assert result == [_user("hello")]
+
+
+@pytest.mark.asyncio
+async def test_bedrock_predict_normalizes_assistant_first(bedrock_engine: BedrockEngine) -> None:
+    """Assistant-first history (e.g. a hub opening message) gets a placeholder
+    user turn; the system prompt still routes to system=."""
+    captured: dict = {}
+    _capture_call(bedrock_engine, captured)
+
+    chat = [
+        ChatMessage(role=ChatRole.SYSTEM, content="You are a helper."),
+        ChatMessage(role=ChatRole.ASSISTANT, content="Welcome!"),
+        ChatMessage(role=ChatRole.USER, content="Hi"),
+    ]
+    await bedrock_engine.predict(chat)
+
+    assert captured["system"] == [{"text": "You are a helper."}]
+    assert captured["messages"] == [
+        _user(_FIRST_TURN_PLACEHOLDER),
+        _assistant("Welcome!"),
+        _user("Hi"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_bedrock_predict_drops_none_content(bedrock_engine: BedrockEngine) -> None:
+    captured: dict = {}
+    _capture_call(bedrock_engine, captured)
+
+    chat = [
+        ChatMessage(role=ChatRole.ASSISTANT, content=None),
+        ChatMessage(role=ChatRole.USER, content="hello"),
+    ]
+    await bedrock_engine.predict(chat)
+
+    assert captured["messages"] == [_user("hello")]
 
 
 # ---------------------------------------------------------------------------

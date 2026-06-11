@@ -25,6 +25,32 @@ class BedrockCompletion(BaseCompletion):
         return None
 
 
+_FIRST_TURN_PLACEHOLDER = "[start of conversation]"
+
+
+def normalize_converse_messages(conversation: list[dict]) -> list[dict]:
+    """Reshape messages to satisfy Converse API constraints: no empty text
+    blocks, strictly alternating roles, and a user message first."""
+    normalized: list[dict] = []
+    for entry in conversation:
+        text = entry["content"][0]["text"]
+        if not text or not text.strip():
+            continue
+        if normalized and normalized[-1]["role"] == entry["role"]:
+            previous = normalized[-1]["content"][0]["text"]
+            normalized[-1] = {
+                "role": entry["role"],
+                "content": [{"text": f"{previous}\n\n{text}"}],
+            }
+        else:
+            normalized.append(entry)
+    if normalized and normalized[0]["role"] == "assistant":
+        normalized.insert(
+            0, {"role": "user", "content": [{"text": _FIRST_TURN_PLACEHOLDER}]}
+        )
+    return normalized
+
+
 _CONTEXT_SIZES: dict[str, int] = {
     # Anthropic Claude
     "us.anthropic.claude-sonnet-4-6": 200_000,
@@ -84,12 +110,15 @@ class BedrockEngine(BaseEngine):
         conversation: list[dict] = []
 
         for msg in messages:
+            if msg.content is None:
+                continue
             content = msg.content if isinstance(msg.content, str) else str(msg.content)
             if msg.role == ChatRole.SYSTEM:
                 system_blocks.append({"text": content})
             else:
                 role = "user" if msg.role == ChatRole.USER else "assistant"
                 conversation.append({"role": role, "content": [{"text": content}]})
+        conversation = normalize_converse_messages(conversation)
 
         loop = asyncio.get_running_loop()
         response = await loop.run_in_executor(None, self._call_bedrock, system_blocks, conversation)
