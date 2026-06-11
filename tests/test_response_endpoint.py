@@ -1,8 +1,11 @@
 import datetime
 from collections.abc import AsyncGenerator
+from unittest.mock import patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from kani.engines.base import BaseEngine  # type: ignore[import-untyped]
+from kani.models import ChatMessage, ChatRole  # type: ignore[import-untyped]
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,6 +18,7 @@ from app.config import (
     UTTERANCE_STATUS_SENT,
 )
 from app.db import get_async_session
+from app.engines.bedrock import _FIRST_TURN_PLACEHOLDER, BedrockCompletion, BedrockEngine
 from app.main import app
 from app.models.auth import ApiKey
 from app.models.response import Conversation, Speaker, Utterance
@@ -28,6 +32,7 @@ from app.response.crud import (
     get_or_create_speaker,
 )
 from app.response.prompt import compose_instruction_prompt
+from app.response.service import _generate_reply as real_generate_reply
 from app.response.utils import day_marker
 
 API_KEY = "test-api-key"
@@ -881,3 +886,122 @@ async def test_normal_message_after_initial_uses_same_conversation(
     )
     assert follow_response.status_code == 202
     assert follow_response.json()["conversation_id"] == init_conv_id
+
+
+# ---------------------------------------------------------------------------
+# End-to-end through the real Kani round (kani_stub bypassed)
+# ---------------------------------------------------------------------------
+
+
+class _CaptureEngine(BaseEngine):  # type: ignore[misc]
+    """Minimal kani engine that records the exact messages it is handed."""
+
+    max_context_size = 100_000
+
+    def __init__(self) -> None:
+        self.captured: list[ChatMessage] = []
+
+    def message_len(self, message: ChatMessage) -> int:
+        return 1
+
+    async def prompt_len(
+        self, messages: list[ChatMessage], functions: list | None = None, **kwargs: object
+    ) -> int:
+        return len(messages)
+
+    async def predict(
+        self, messages: list[ChatMessage], functions: list | None = None, **kwargs: object
+    ) -> BedrockCompletion:
+        self.captured = list(messages)
+        return BedrockCompletion(ChatMessage(role=ChatRole.ASSISTANT, content="canned reply"))
+
+    async def close(self) -> None:
+        pass
+
+
+@pytest.mark.asyncio
+async def test_e2e_hub_opening_flows_through_real_kani_round(
+    async_client: AsyncClient,
+    async_session: AsyncSession,
+    sms_outbox: list[dict[str, str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The autouse kani_stub bypasses kani entirely; this test restores the
+    real _generate_reply and proves an assistant-first history survives the
+    full Kani round."""
+    monkeypatch.setattr(response_service, "_generate_reply", real_generate_reply)
+    engine = _CaptureEngine()
+    monkeypatch.setattr(response_service, "_create_engine", lambda *_a, **_k: engine)
+
+    await async_client.post(
+        "/response",
+        headers={"Authorization": f"Bearer {API_KEY}"},
+        json={
+            "user_id": "u-real-kani",
+            "input": "Hello, welcome!",
+            "metadata": {"is_initial": True},
+        },
+    )
+    response = await async_client.post(
+        "/response",
+        headers={"Authorization": f"Bearer {API_KEY}"},
+        json={"user_id": "u-real-kani", "input": "thanks"},
+    )
+    assert response.status_code == 202
+
+    assert [(msg.role, msg.content) for msg in engine.captured] == [
+        (ChatRole.SYSTEM, compose_instruction_prompt(DEFAULT_SYSTEM_PROMPT)),
+        (ChatRole.ASSISTANT, f"{_today_marker()}\nHello, welcome!"),
+        (ChatRole.USER, "thanks"),
+    ]
+    assert sms_outbox[-1]["message"] == "canned reply"
+
+
+@pytest.mark.asyncio
+async def test_two_hub_openings_normalized_for_bedrock(
+    async_client: AsyncClient,
+    async_session: AsyncSession,
+    sms_outbox: list[dict[str, str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two back-to-back hub openings reach the Converse payload merged into a
+    single assistant turn behind the placeholder user turn."""
+    monkeypatch.setattr(response_service, "_generate_reply", real_generate_reply)
+    with patch("boto3.client"):
+        engine = BedrockEngine(model_id="us.anthropic.claude-sonnet-4-6")
+    captured: dict[str, list] = {}
+
+    def _fake_call(system_blocks: list, messages: list) -> dict:
+        captured["system"] = system_blocks
+        captured["messages"] = messages
+        return {"output": {"message": {"content": [{"text": "bedrock reply"}]}}}
+
+    engine._call_bedrock = _fake_call  # type: ignore[method-assign]
+    monkeypatch.setattr(response_service, "_create_engine", lambda *_a, **_k: engine)
+
+    for opening in ("Opening one", "Opening two"):
+        await async_client.post(
+            "/response",
+            headers={"Authorization": f"Bearer {API_KEY}"},
+            json={
+                "user_id": "u-two-openings",
+                "input": opening,
+                "metadata": {"is_initial": True},
+            },
+        )
+    response = await async_client.post(
+        "/response",
+        headers={"Authorization": f"Bearer {API_KEY}"},
+        json={"user_id": "u-two-openings", "input": "hi there"},
+    )
+    assert response.status_code == 202
+
+    assert captured["messages"] == [
+        {"role": "user", "content": [{"text": _FIRST_TURN_PLACEHOLDER}]},
+        {
+            "role": "assistant",
+            "content": [{"text": f"{_today_marker()}\nOpening one\n\nOpening two"}],
+        },
+        {"role": "user", "content": [{"text": "hi there"}]},
+    ]
+    assert sms_outbox[-1]["message"] == "bedrock reply"
