@@ -74,12 +74,14 @@ def upgrade() -> None:
     op.execute("DROP TABLE conv_keepers")
 
     # Per-request prompt data now lives on the bot utterance's generation snapshot.
+    # jsonb_typeof guard: the `-` operator raises "cannot delete from scalar" on
+    # rows whose meta is a bare JSON scalar rather than an object.
     op.execute(
         """
         UPDATE conversations
         SET meta = meta - 'texet_instruction_prompt' - 'texet_day_number'
                         - 'texet_user_local_time'
-        WHERE meta IS NOT NULL
+        WHERE meta IS NOT NULL AND jsonb_typeof(meta) = 'object'
         """
     )
 
