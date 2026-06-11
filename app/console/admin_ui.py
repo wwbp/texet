@@ -56,8 +56,9 @@ def _fmt_meta_detail(m: object, a: str) -> Markup:
             payload = json.dumps(val, sort_keys=True, default=str)
             blocks.append(
                 Markup(
-                    '<div><strong>{}</strong></div>'
-                    '<json-viewer data="{}" expanded="1" show-toolbar="true"></json-viewer>'
+                    "<div><strong>{}</strong></div>"
+                    '<andypf-json-viewer data="{}" expanded="1" show-copy="true">'
+                    "</andypf-json-viewer>"
                 ).format(label, payload)
             )
         else:
