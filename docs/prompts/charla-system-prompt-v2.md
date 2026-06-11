@@ -4,7 +4,7 @@
 
 - Paste the prompt text below (everything inside the code block) into **admin console → System Prompts → create**. The newest row wins, so creating a new row deploys it.
 - Pick the provider/model on the same form. **Recommendation: move off `us.meta.llama4-maverick-17b-instruct-v1:0`.** The prod transcript that motivated this rewrite (utterance `eb02e4ed`) showed Maverick falling back on trained "as an AI I don't retain conversations" reflexes despite having the full history in context, and staying consistent with its own denials thereafter. A stronger instruction-following model (e.g. `us.anthropic.claude-sonnet-4-6`, already in the engine's context-size table) makes every section below far more reliable.
-- Deploy this prompt in the same release window as the code that renames the daily section to `[Today's Activity (Day N)]` and adds day markers — the prompt references both.
+- **Order matters, simultaneity doesn't:** deploy the code first (day markers, `[Today's Activity (Day N)]` label, openings-in-history), then paste this prompt any time after. New code with the old prompt is fine — the code-appended conventions section carries the critical self-knowledge. This prompt with old code is not fine: it would describe day markers and in-thread openings that don't exist yet.
 - The code automatically appends a `[Conversation history conventions]` section after whatever is pasted here (see `app/response/prompt.py`); do not duplicate that content.
 
 ## What changed vs v1 and why
