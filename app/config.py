@@ -113,6 +113,38 @@ def get_openai_model() -> str:
     return os.getenv("OPENAI_MODEL", "")
 
 
+# MOCK_EXTERNAL_APIS: replace LLM generation, moderation, and outbound SMS with
+# in-process fakes that simulate latency. Load testing only — never set in production.
+def mock_external_apis() -> bool:
+    return os.getenv("MOCK_EXTERNAL_APIS", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _get_latency_ms(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if not value:
+        return default
+    try:
+        parsed = int(value)
+    except ValueError:
+        return default
+    return parsed if parsed >= 0 else default
+
+
+# MOCK_LLM_LATENCY_MS: simulated LLM generation latency when MOCK_EXTERNAL_APIS is on.
+def get_mock_llm_latency_ms() -> int:
+    return _get_latency_ms("MOCK_LLM_LATENCY_MS", 1500)
+
+
+# MOCK_MODERATION_LATENCY_MS: simulated moderation latency when MOCK_EXTERNAL_APIS is on.
+def get_mock_moderation_latency_ms() -> int:
+    return _get_latency_ms("MOCK_MODERATION_LATENCY_MS", 300)
+
+
+# MOCK_SMS_LATENCY_MS: simulated outbound SMS latency when MOCK_EXTERNAL_APIS is on.
+def get_mock_sms_latency_ms() -> int:
+    return _get_latency_ms("MOCK_SMS_LATENCY_MS", 150)
+
+
 # ADMIN_USERNAME: username for SQLAdmin login.
 def get_admin_username() -> str:
     return os.getenv("ADMIN_USERNAME", "")

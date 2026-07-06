@@ -19,3 +19,4 @@ build/
 coverage.xml
 htmlcov/
 AWS_STAGING_INFRA_SETUP_ONE_TIME.md
+perf-results/

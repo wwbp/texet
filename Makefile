@@ -1,4 +1,4 @@
-.PHONY: help start down reset check test qa-required migration migrate smoke smoke-moderation api-key lint fix type audit load
+.PHONY: help start down reset check test qa-required migration migrate smoke smoke-moderation api-key lint fix type audit load load-perf
 
 help:
 	@awk 'BEGIN{FS=":.*##"} /^[a-zA-Z_-]+:.*##/{printf "%-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -65,3 +65,9 @@ load: ## Locust load test UI (HOST=http://localhost:8000, requires TEXET_API_KEY
 
 load-hub: ## Hub load test UI (HOST=..., requires HUB_API_KEY and DATABASE_URL_STAGING)
 	TEST_MODE=true uv run locust -f locust_hub.py --host $${HOST:?HOST is required}
+
+load-perf: ## Headless perf run: USERS=500 @ ~100 rps for DURATION=5m (requires TEXET_API_KEY; api must run with MOCK_EXTERNAL_APIS=true)
+	@mkdir -p perf-results
+	uv run locust --host $${HOST:-http://localhost:8000} --headless \
+		--users $${USERS:-500} --spawn-rate $${SPAWN_RATE:-25} --run-time $${DURATION:-5m} \
+		--csv perf-results/run --csv-full-history --html perf-results/run.html

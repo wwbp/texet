@@ -32,12 +32,16 @@ from app.config import (
     get_mail_use_credentials,
     get_mail_username,
     get_mail_validate_certs,
+    get_mock_llm_latency_ms,
+    get_mock_moderation_latency_ms,
+    get_mock_sms_latency_ms,
     get_moderation_alert_emails,
     get_openai_api_key,
     get_public_app_url,
     get_sms_outbound_authorization,
     get_sms_outbound_url,
     get_sms_timeout_seconds,
+    mock_external_apis,
 )
 from app.db import get_sessionmaker
 from app.engines.factory import create_engine as _create_engine
@@ -106,6 +110,10 @@ async def _generate_reply(
     provider: str = "openai",
     model_id: str = "gpt-4o-mini",
 ) -> str:
+    if mock_external_apis():
+        await asyncio.sleep(get_mock_llm_latency_ms() / 1000)
+        return f"[mock {provider}/{model_id}] Echo: {query[:120]}"
+
     engine = _create_engine(provider, model_id)
     kani = Kani(engine=engine, system_prompt=system_prompt, chat_history=chat_history)
 
@@ -157,6 +165,10 @@ async def _send_sms(
     utterance_id: str,
     in_reply_to_utterance_id: str | None = None,
 ) -> None:
+    if mock_external_apis():
+        await asyncio.sleep(get_mock_sms_latency_ms() / 1000)
+        return
+
     url = get_sms_outbound_url()
     if not url:
         raise RuntimeError("SMS_OUTBOUND_URL is not set.")
@@ -186,6 +198,10 @@ async def _close_async_openai_client(client: AsyncOpenAI) -> None:
 
 
 async def _moderate_text(text: str) -> tuple[bool, str, str, float]:
+    if mock_external_apis():
+        await asyncio.sleep(get_mock_moderation_latency_ms() / 1000)
+        return False, "", "", 0.0
+
     api_key = get_openai_api_key()
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY is not set.")

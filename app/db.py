@@ -13,6 +13,17 @@ from sqlalchemy.ext.asyncio import (
 from app.config import DEFAULT_TIMEZONE_NAME
 
 
+def _pool_setting(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if not value:
+        return default
+    try:
+        parsed = int(value)
+    except ValueError:
+        return default
+    return parsed if parsed >= 0 else default
+
+
 @lru_cache
 def get_engine() -> AsyncEngine:
     url = os.getenv("DATABASE_URL")
@@ -21,6 +32,9 @@ def get_engine() -> AsyncEngine:
     return create_async_engine(
         url,
         pool_pre_ping=True,
+        # DB_POOL_SIZE / DB_MAX_OVERFLOW: SQLAlchemy defaults (5 / 10) unless overridden.
+        pool_size=_pool_setting("DB_POOL_SIZE", 5),
+        max_overflow=_pool_setting("DB_MAX_OVERFLOW", 10),
         connect_args={"server_settings": {"timezone": DEFAULT_TIMEZONE_NAME}},
     )
 

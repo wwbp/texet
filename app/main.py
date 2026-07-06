@@ -1,4 +1,5 @@
 import datetime
+import logging
 import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -15,6 +16,7 @@ from app.config import (
     admin_enabled,
     get_admin_secret_key,
     get_admin_session_ttl_seconds,
+    mock_external_apis,
 )
 from app.console import console_router, init_console
 from app.db import get_async_session, ping_db
@@ -37,6 +39,11 @@ class _ForceHTTPSMiddleware:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    if mock_external_apis():
+        logging.getLogger(__name__).warning(
+            "MOCK_EXTERNAL_APIS is enabled — LLM, moderation, and SMS calls are faked. "
+            "Load testing only; disable in production."
+        )
     init_console(app)
     start_scheduler()
     try:
