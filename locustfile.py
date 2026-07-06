@@ -52,7 +52,8 @@ class TexetUser(HttpUser):
     wait_time = constant_throughput(RPS_PER_USER)
 
     def on_start(self) -> None:
-        self.user_id = f"loadtest-{next(_user_counter):06d}"
+        # PID keeps IDs unique when locust runs with --processes.
+        self.user_id = f"loadtest-{os.getpid()}-{next(_user_counter):06d}"
 
     @task(10)
     def send_message(self) -> None:

@@ -12,6 +12,10 @@ from app.models.auth import ApiKey
 
 _security = HTTPBearer(auto_error=False)
 
+# last_used_at is informational (shown in the admin console); refreshing it at
+# most once per interval avoids a write + commit on every authenticated request.
+_LAST_USED_REFRESH_SECONDS = 60
+
 
 def hash_api_key(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
@@ -54,8 +58,13 @@ async def require_auth(
 
         api_key = await _get_api_key(session, token)
         if api_key:
-            api_key.last_used_at = datetime.datetime.now(DEFAULT_TIMEZONE)
-            await session.commit()
+            now = datetime.datetime.now(DEFAULT_TIMEZONE)
+            if (
+                api_key.last_used_at is None
+                or (now - api_key.last_used_at).total_seconds() >= _LAST_USED_REFRESH_SECONDS
+            ):
+                api_key.last_used_at = now
+                await session.commit()
             return
 
         raise HTTPException(

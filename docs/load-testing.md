@@ -34,8 +34,10 @@ Total simulated external latency per message: **~2.25 s**.
 
 ## The bottleneck: DB connections held across external calls
 
-`_drain_user_queue` ([service.py:641](../app/response/service.py#L641)) opens a
-DB session and holds its pooled connection for the *entire* reply pipeline —
+*(Fixed in round 2 below — this section documents the behavior behind runs 1–2.)*
+
+`_drain_user_queue` opened a
+DB session and held its pooled connection for the *entire* reply pipeline —
 moderation → LLM → reply moderation → SMS. So each in-flight message pins a
 connection for the full external-latency window, and by Little's law:
 
@@ -98,39 +100,82 @@ length — at 500 users × ~11 messages/min each, read volume compounds fast. Th
 one-week window bounds this in production (real users won't send 11 msg/min for
 hours), but it is the next ceiling after connections.
 
+## Round 2: design fixes + scaling further (same day)
+
+Three fixes landed after runs 1–2, targeting the root causes above:
+
+1. **Sessions are no longer held across external calls.**
+   `_process_queued_reply` now reads all prompt/history context in one
+   short-lived session, runs moderation/LLM with no connection held, and opens
+   a fresh session to persist (SMS still sends before commit, preserving the
+   rollback-on-delivery-failure semantics). Connection hold per message dropped
+   from ~2.25 s to ~150 ms.
+2. **Indexes added** (migration `0ae531a57aaa`):
+   `utterances (conversation_id, timestamp)` and `(speaker_id, status)`.
+3. **Auth timestamp throttled**: `last_used_at` is refreshed at most once per
+   60 s instead of a write + commit on every request.
+
+### Run 3 — the run-1 collapse config (pool 20+30, 500 users / 100 rps): passes
+
+| Metric | Run 1 (before) | Run 3 (after) |
+|---|---|---|
+| Failure rate | 83.9% | **0.52%** |
+| `/response` p50 | 10,000 ms | **430 ms** |
+| `/response` p95 | 10,000 ms | **800 ms** |
+| Throughput | 51.6 rps | **97.5 rps** |
+| `QueuePool` errors | 2,996 | **0** |
+| db CPU trend | 60% → 233% (superlinear) | **flat ~40%** |
+
+Identical load, identical pool. The residual 0.5% failures correlate with api
+CPU peaking at ~104% of one core — the single uvicorn worker, not the DB, is
+now the limit.
+
+### Run 4 — 1000 users / 200 rps (pool 40+60): single-worker CPU ceiling
+
+| Metric | Value |
+|---|---|
+| Throughput | 179.6 rps of 200 target |
+| Failure rate | 10.2% (client 10s timeouts) |
+| `/response` p50 / p95 | 660 ms / 9,400 ms |
+| api CPU | pegged 100% of one core for the entire run |
+| db CPU | ~45% (healthy) |
+| Locust client CPU | 16–21% (not a confound) |
+| `QueuePool` errors | 54 (pool 100 slightly tight) |
+| Background queue | fell behind: 14,252 replies still queued at test end |
+
+Two conclusions. First, **one uvicorn worker saturates between ~100 and
+~160 msg/s** — beyond that, capacity must come from more workers/replicas,
+which is blocked on the shared-queue work below. Second, there is **no
+backpressure**: `/response` keeps 202-accepting while the reply queue grows
+without bound, and a restart strands queued utterances — nothing re-drains
+them until that user happens to message again.
+
 ## Scaling guidance for deployment
 
-1. **Size the DB pool to the throughput target.** Required connections ≈
-   target msg/s × external-latency seconds (use observed p95 LLM latency, not
-   the mean). Set `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` (new env vars, default
-   5/10) and raise Postgres `max_connections` (or use RDS Proxy/pgbouncer —
-   but note session-level pooling is required, transactions span awaits).
-2. **The real fix is architectural: don't hold a connection across external
-   calls.** Release the session before the LLM call and reopen it to persist
-   the reply. That collapses connection demand from ~205 to ~10–20 at 100 rps
-   and removes the need for a 300-connection Postgres. Worth doing before any
-   horizontal scale-out.
-3. **Single-replica constraint still stands.** Per-user serialization is an
-   in-process `asyncio.Lock`, and background work is FastAPI `BackgroundTasks`
-   in the web process — scaling to multiple replicas/workers needs a shared
-   queue (e.g. Postgres `SELECT ... FOR UPDATE SKIP LOCKED` on the queued
-   utterances, or SQS) before it is safe.
-4. **CPU headroom is fine at this scale.** One uvicorn worker peaked below one
-   core at ~90 msg/s with mocked externals; the event loop is not the
-   bottleneck at 100 rps.
-5. **Auth adds 2 DB round-trips per request** (SELECT on `api_keys` + COMMIT
-   for `last_used_at`). At sustained high rps consider caching key hashes or
-   batching the timestamp update.
-6. **Chat-history rebuild is the next ceiling — and `utterances` has no
-   indexes.** Run 2 degraded after ~3 minutes as per-reply history reads grew
-   with conversation length (db CPU 60% → 233% over 4 minutes). Verified in
-   Postgres: the only index on `utterances` is its primary key, so every
-   history rebuild and every queued-reply poll
-   (`speaker_id + status = 'queued'`) is a sequential scan over the whole
-   table. Before scaling up, add indexes on
-   `utterances (conversation_id, timestamp)` and
-   `utterances (speaker_id, status)` (via `make migration`), and consider
-   capping history at the N most recent messages instead of the full week.
+Done in round 2 (see above): sessions released around external calls, indexes
+on `utterances`, throttled auth writes. Remaining, in priority order:
+
+1. **Up to ~100 msg/s: deploy as-is with a modest pool.** One replica with
+   `DB_POOL_SIZE=20` / `DB_MAX_OVERFLOW=30` handled 500 users / 100 rps with
+   p95 800 ms. Connection demand is now ≈ msg/s × 0.15 s (the persist+SMS
+   window — SMS deliberately sends inside the transaction) plus context reads;
+   size the pool with headroom above that and verify with a run 3-style test.
+2. **Beyond ~100 msg/s: scale out workers/replicas — which first needs a
+   shared queue.** One uvicorn worker CPU-saturates at ~100–160 msg/s. Both
+   the per-user `asyncio.Lock` and `BackgroundTasks` are in-process, so
+   multiple workers/replicas are unsafe until queued utterances are claimed
+   via a shared mechanism (Postgres `SELECT ... FOR UPDATE SKIP LOCKED`, or
+   SQS + a worker service).
+3. **Add backpressure and a re-drain path.** `/response` 202-accepts
+   regardless of queue depth (run 4 ended with a 14k backlog), and queued
+   utterances stranded by a deploy/restart are never picked up until that user
+   messages again. Options: reject/429 above a queue-depth threshold, and on
+   startup (or on a timer) kick `_drain_user_queue` for users with queued
+   utterances.
+4. **Consider capping chat history** at the N most recent messages instead of
+   the full week — with indexes the reads are cheap, but prompt size still
+   grows linearly with conversation length (LLM cost/latency, not DB, at
+   realistic volumes).
 
 ## Cleanup
 

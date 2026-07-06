@@ -8,10 +8,9 @@ services:
       MOCK_LLM_LATENCY_MS: "1500"
       MOCK_MODERATION_LATENCY_MS: "300"
       MOCK_SMS_LATENCY_MS: "150"
-      # Background replies hold a connection for the full external-latency window
-      # (~2.25s mocked), so sustained msg/s ≈ (pool + overflow) / hold-time.
-      # 100 rps needs ~230 connections; Postgres max_connections is raised to match.
-      DB_POOL_SIZE: "100"
-      DB_MAX_OVERFLOW: "150"
+      # Sessions are released around external calls, so connections are held
+      # only for context reads and the persist+SMS window (~150ms/message).
+      DB_POOL_SIZE: "${PERF_DB_POOL_SIZE:-20}"
+      DB_MAX_OVERFLOW: "${PERF_DB_MAX_OVERFLOW:-30}"
   db:
     command: postgres -c max_connections=300

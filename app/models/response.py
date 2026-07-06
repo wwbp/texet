@@ -61,6 +61,10 @@ class Utterance(Base):
             f"status in ({UTTERANCE_STATUSES_SQL})",
             name="ck_utterances_status",
         ),
+        # Chat-history rebuilds filter by conversation and order by timestamp;
+        # the background drain polls by bot speaker + queued status.
+        Index("ix_utterances_conversation_id_timestamp", "conversation_id", "timestamp"),
+        Index("ix_utterances_speaker_id_status", "speaker_id", "status"),
     )
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
