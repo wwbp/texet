@@ -65,6 +65,13 @@ class Utterance(Base):
         # the background drain polls by bot speaker + queued status.
         Index("ix_utterances_conversation_id_timestamp", "conversation_id", "timestamp"),
         Index("ix_utterances_speaker_id_status", "speaker_id", "status"),
+        # Worker claim/count queries scan only in-flight replies.
+        Index(
+            "ix_utterances_pending_timestamp",
+            "status",
+            "timestamp",
+            postgresql_where=text("status in ('queued', 'processing')"),
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
@@ -82,6 +89,12 @@ class Utterance(Base):
     status: Mapped[str] = mapped_column(
         String(16), default=UTTERANCE_STATUS_RECEIVED, nullable=False
     )
+    # Work-queue bookkeeping for queued bot replies: when the current worker
+    # claim happened and how many claims this reply has consumed.
+    claimed_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     text: Mapped[str | None] = mapped_column(Text, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     meta: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
