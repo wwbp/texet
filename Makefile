@@ -1,4 +1,4 @@
-.PHONY: help start down reset check test qa-required migration migrate smoke smoke-moderation api-key lint fix type audit load load-perf
+.PHONY: help start down reset check test qa-required migration migrate smoke smoke-moderation api-key lint fix type audit load load-perf worker-logs
 
 help:
 	@awk 'BEGIN{FS=":.*##"} /^[a-zA-Z_-]+:.*##/{printf "%-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -10,6 +10,9 @@ start: ## Build and start the stack
 
 down: ## Stop the stack (keep volumes)
 	docker compose down
+
+worker-logs: ## Follow the reply worker logs
+	docker compose logs -f worker
 
 reset: ## Stop the stack and remove volumes
 	docker compose down -v

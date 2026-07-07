@@ -1,16 +1,31 @@
 # Perf-testing override: fakes all external APIs and widens the DB pool.
 # Usage: docker compose -f docker-compose.yml -f docker-compose.perf.yml up --build -d
+#
+# Reply generation now runs in the worker service, so scale reply throughput
+# with PERF_WORKER_REPLICAS / WORKER_CONCURRENCY, not the api container.
+x-mock-env: &mock-env
+  MOCK_EXTERNAL_APIS: "true"
+  # Simulated external latencies (ms); tune to match observed prod values.
+  MOCK_LLM_LATENCY_MS: "1500"
+  MOCK_MODERATION_LATENCY_MS: "300"
+  MOCK_SMS_LATENCY_MS: "150"
+
 services:
   api:
     environment:
-      MOCK_EXTERNAL_APIS: "true"
-      # Simulated external latencies (ms); tune to match observed prod values.
-      MOCK_LLM_LATENCY_MS: "1500"
-      MOCK_MODERATION_LATENCY_MS: "300"
-      MOCK_SMS_LATENCY_MS: "150"
+      <<: *mock-env
       # Sessions are released around external calls, so connections are held
       # only for context reads and the persist+SMS window (~150ms/message).
       DB_POOL_SIZE: "${PERF_DB_POOL_SIZE:-20}"
       DB_MAX_OVERFLOW: "${PERF_DB_MAX_OVERFLOW:-30}"
+  worker:
+    environment:
+      <<: *mock-env
+      SKIP_MIGRATIONS: "true"
+      WORKER_CONCURRENCY: "${PERF_WORKER_CONCURRENCY:-40}"
+      DB_POOL_SIZE: "${PERF_WORKER_DB_POOL_SIZE:-20}"
+      DB_MAX_OVERFLOW: "${PERF_WORKER_DB_MAX_OVERFLOW:-40}"
+    deploy:
+      replicas: ${PERF_WORKER_REPLICAS:-1}
   db:
     command: postgres -c max_connections=300

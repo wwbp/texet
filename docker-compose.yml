@@ -21,6 +21,21 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env.api
+    environment:
+      # The api service owns migrations; the worker must not race it.
+      SKIP_MIGRATIONS: "true"
+    command: ["uv", "run", "python", "-m", "app.worker"]
+    depends_on:
+      db:
+        condition: service_healthy
+      api:
+        condition: service_healthy
   db:
     image: postgres:16-alpine
     env_file: .env.db
