@@ -1,0 +1,20 @@
+# Copy to terraform.tfvars and edit. All values are optional (defaults shown).
+
+# aws_region = "us-east-1"
+
+# Scaling levers for the load test:
+# worker_count       = 3     # number of worker tasks (reply throughput)
+# worker_concurrency = 80    # claim/process loops per worker
+# max_queue_depth    = 1000  # 503 backpressure threshold (0 disables)
+
+# db_instance_class = "db.t3.medium"   # DB was the run-5b ceiling; bump for headroom
+# api_cpu = 512
+# worker_cpu = 1024
+
+# Simulated external latencies (ms):
+# mock_llm_latency_ms        = 1500
+# mock_moderation_latency_ms = 300
+# mock_sms_latency_ms        = 150
+
+# Lock the ALB to your IP instead of the world (recommended):
+# allowed_ingress_cidr = "203.0.113.4/32"
