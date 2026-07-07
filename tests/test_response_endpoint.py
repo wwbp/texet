@@ -7,13 +7,15 @@ from httpx import ASGITransport, AsyncClient
 from kani.engines.base import BaseEngine  # type: ignore[import-untyped]
 from kani.models import ChatMessage, ChatRole  # type: ignore[import-untyped]
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker
 
+from app import worker as reply_worker
 from app.auth import hash_api_key
 from app.config import (
     DEFAULT_TIMEZONE,
     UTTERANCE_STATUS_FAILED,
     UTTERANCE_STATUS_MODERATED,
+    UTTERANCE_STATUS_QUEUED,
     UTTERANCE_STATUS_RECEIVED,
     UTTERANCE_STATUS_SENT,
 )
@@ -41,6 +43,17 @@ API_KEY = "test-api-key"
 def _today_marker() -> str:
     """Day marker for messages created 'now' with no user timezone (UTC fallback)."""
     return day_marker(datetime.datetime.now(datetime.UTC).date())
+
+
+async def _drain_replies(session: AsyncSession) -> None:
+    """Process queued replies the way the worker service would in deployment."""
+    bind = session.bind
+    if bind is None:
+        raise RuntimeError("AsyncSession missing bind.")
+    engine = bind.engine if isinstance(bind, AsyncConnection) else bind
+    sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
+    while await reply_worker.process_one(sessionmaker):
+        pass
 
 
 @pytest.fixture()
@@ -225,6 +238,7 @@ async def test_response_rejects_oversized_input(async_client: AsyncClient) -> No
 @pytest.mark.asyncio
 async def test_response_accepts_max_length_input(
     async_client: AsyncClient,
+    async_session: AsyncSession,
     sms_outbox: list[dict[str, str]],
 ) -> None:
     message = "a" * 10_000
@@ -233,6 +247,7 @@ async def test_response_accepts_max_length_input(
         headers={"Authorization": f"Bearer {API_KEY}"},
         json={"user_id": "u-large", "input": message},
     )
+    await _drain_replies(async_session)
     assert response.status_code == 202
     assert len(sms_outbox) == 1
     body = response.json()
@@ -254,6 +269,7 @@ async def test_response_success_persists(
         headers={"Authorization": f"Bearer {API_KEY}"},
         json=payload,
     )
+    await _drain_replies(async_session)
     assert response.status_code == 202
     first_body = response.json()
     assert first_body["object"] == "response"
@@ -270,6 +286,7 @@ async def test_response_success_persists(
         headers={"Authorization": f"Bearer {API_KEY}"},
         json=second_payload,
     )
+    await _drain_replies(async_session)
     assert second.status_code == 202
     second_body = second.json()
     assert second_body["status"] == "queued"
@@ -344,6 +361,7 @@ async def test_response_reuses_existing_conversation_history(
         headers={"Authorization": f"Bearer {API_KEY}"},
         json={"user_id": "u-existing", "input": "follow-up"},
     )
+    await _drain_replies(async_session)
     assert response.status_code == 202
     body = response.json()
     assert body["conversation_id"] == conversation.id
@@ -389,6 +407,7 @@ async def test_response_multiple_users_interleaved(
             headers={"Authorization": f"Bearer {API_KEY}"},
             json=payload,
         )
+        await _drain_replies(async_session)
         assert response.status_code == 202
         body = response.json()
         assert body["status"] == "queued"
@@ -476,6 +495,7 @@ async def test_response_sends_moderation_email_when_blocked(
         headers={"Authorization": f"Bearer {API_KEY}"},
         json={"user_id": "u-mod", "input": "blocked message"},
     )
+    await _drain_replies(async_session)
     assert response.status_code == 202
     body = response.json()
 
@@ -543,6 +563,7 @@ async def test_response_does_not_fail_if_moderation_email_errors(
         headers={"Authorization": f"Bearer {API_KEY}"},
         json={"user_id": "u-mod-mail-fail", "input": "blocked message"},
     )
+    await _drain_replies(async_session)
     assert response.status_code == 202
     body = response.json()
 
@@ -589,6 +610,7 @@ async def test_response_moderates_generated_reply_and_persists_raw_output(
         headers={"Authorization": f"Bearer {API_KEY}"},
         json={"user_id": "u-bot-mod", "input": "hello"},
     )
+    await _drain_replies(async_session)
     assert response.status_code == 202
     body = response.json()
 
@@ -644,6 +666,7 @@ async def test_response_marks_failed_on_generation_error(
         headers={"Authorization": f"Bearer {API_KEY}"},
         json=payload,
     )
+    await _drain_replies(async_session)
     assert response.status_code == 202
 
     async_session.expire_all()
@@ -677,6 +700,7 @@ async def test_response_marks_failed_on_sms_error(
         headers={"Authorization": f"Bearer {API_KEY}"},
         json=payload,
     )
+    await _drain_replies(async_session)
     assert response.status_code == 202
 
     async_session.expire_all()
@@ -704,16 +728,19 @@ async def test_response_single_conversation_across_day_numbers(
         headers={"Authorization": f"Bearer {API_KEY}"},
         json={"user_id": "u-week", "input": "day one", "metadata": {"day_number": 1}},
     )
+    await _drain_replies(async_session)
     day2 = await async_client.post(
         "/response",
         headers={"Authorization": f"Bearer {API_KEY}"},
         json={"user_id": "u-week", "input": "day two", "metadata": {"day_number": 2}},
     )
+    await _drain_replies(async_session)
     no_day = await async_client.post(
         "/response",
         headers={"Authorization": f"Bearer {API_KEY}"},
         json={"user_id": "u-week", "input": "no metadata"},
     )
+    await _drain_replies(async_session)
     assert day1.status_code == 202
     assert day2.status_code == 202
     assert no_day.status_code == 202
@@ -754,6 +781,7 @@ async def test_initial_message_persisted_as_bot_utterance(
             "metadata": {"is_initial": True},
         },
     )
+    await _drain_replies(async_session)
     assert response.status_code == 202
     body = response.json()
     assert body["object"] == "response"
@@ -795,12 +823,14 @@ async def test_initial_message_included_in_history_not_system_prompt(
             "metadata": {"is_initial": True},
         },
     )
+    await _drain_replies(async_session)
 
     response = await async_client.post(
         "/response",
         headers={"Authorization": f"Bearer {API_KEY}"},
         json={"user_id": "u-init-history", "input": "thanks"},
     )
+    await _drain_replies(async_session)
     assert response.status_code == 202
 
     assert len(kani_stub) == 1
@@ -822,6 +852,7 @@ async def test_initial_message_does_not_create_queued_bot_utterance(
             "metadata": {"is_initial": True},
         },
     )
+    await _drain_replies(async_session)
     assert response.status_code == 202
 
     async_session.expire_all()
@@ -846,6 +877,7 @@ async def test_initial_message_joins_single_conversation(
             "metadata": {"is_initial": True, "day_number": 3},
         },
     )
+    await _drain_replies(async_session)
     assert initial.status_code == 202
 
     later = await async_client.post(
@@ -857,6 +889,7 @@ async def test_initial_message_joins_single_conversation(
             "metadata": {"day_number": 4},
         },
     )
+    await _drain_replies(async_session)
     assert later.status_code == 202
     assert later.json()["conversation_id"] == initial.json()["conversation_id"]
 
@@ -876,6 +909,7 @@ async def test_normal_message_after_initial_uses_same_conversation(
             "metadata": {"is_initial": True},
         },
     )
+    await _drain_replies(async_session)
     assert init_response.status_code == 202
     init_conv_id = init_response.json()["conversation_id"]
 
@@ -884,6 +918,7 @@ async def test_normal_message_after_initial_uses_same_conversation(
         headers={"Authorization": f"Bearer {API_KEY}"},
         json={"user_id": "u-init-conv", "input": "hello back"},
     )
+    await _drain_replies(async_session)
     assert follow_response.status_code == 202
     assert follow_response.json()["conversation_id"] == init_conv_id
 
@@ -942,11 +977,13 @@ async def test_e2e_hub_opening_flows_through_real_kani_round(
             "metadata": {"is_initial": True},
         },
     )
+    await _drain_replies(async_session)
     response = await async_client.post(
         "/response",
         headers={"Authorization": f"Bearer {API_KEY}"},
         json={"user_id": "u-real-kani", "input": "thanks"},
     )
+    await _drain_replies(async_session)
     assert response.status_code == 202
 
     assert [(msg.role, msg.content) for msg in engine.captured] == [
@@ -989,11 +1026,13 @@ async def test_two_hub_openings_normalized_for_bedrock(
                 "metadata": {"is_initial": True},
             },
         )
+        await _drain_replies(async_session)
     response = await async_client.post(
         "/response",
         headers={"Authorization": f"Bearer {API_KEY}"},
         json={"user_id": "u-two-openings", "input": "hi there"},
     )
+    await _drain_replies(async_session)
     assert response.status_code == 202
 
     assert captured["messages"] == [
@@ -1005,3 +1044,81 @@ async def test_two_hub_openings_normalized_for_bedrock(
         {"role": "user", "content": [{"text": "hi there"}]},
     ]
     assert sms_outbox[-1]["message"] == "bedrock reply"
+
+
+@pytest.mark.asyncio
+async def test_response_leaves_reply_queued_until_worker_runs(
+    async_client: AsyncClient,
+    async_session: AsyncSession,
+    sms_outbox: list[dict[str, str]],
+) -> None:
+    response = await async_client.post(
+        "/response",
+        headers={"Authorization": f"Bearer {API_KEY}"},
+        json={"user_id": "u-queued", "input": "hello"},
+    )
+    assert response.status_code == 202
+    assert sms_outbox == []
+
+    result = await async_session.execute(
+        select(Utterance).where(Utterance.speaker_id == bot_speaker_id("u-queued"))
+    )
+    bot_utterance = result.scalar_one()
+    assert bot_utterance.status == UTTERANCE_STATUS_QUEUED
+
+    await _drain_replies(async_session)
+
+    refreshed = await async_session.get(Utterance, bot_utterance.id, populate_existing=True)
+    assert refreshed is not None
+    assert refreshed.status == UTTERANCE_STATUS_SENT
+    assert len(sms_outbox) == 1
+
+
+@pytest.mark.asyncio
+async def test_response_returns_503_when_reply_queue_is_full(
+    async_client: AsyncClient,
+    async_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MAX_QUEUE_DEPTH", "1")
+
+    first = await async_client.post(
+        "/response",
+        headers={"Authorization": f"Bearer {API_KEY}"},
+        json={"user_id": "u-bp-1", "input": "hello"},
+    )
+    assert first.status_code == 202
+
+    second = await async_client.post(
+        "/response",
+        headers={"Authorization": f"Bearer {API_KEY}"},
+        json={"user_id": "u-bp-2", "input": "hello"},
+    )
+    assert second.status_code == 503
+    assert second.headers["Retry-After"] == "30"
+
+    await _drain_replies(async_session)
+
+    third = await async_client.post(
+        "/response",
+        headers={"Authorization": f"Bearer {API_KEY}"},
+        json={"user_id": "u-bp-3", "input": "hello"},
+    )
+    assert third.status_code == 202
+
+
+@pytest.mark.asyncio
+async def test_response_backpressure_disabled_when_depth_is_zero(
+    async_client: AsyncClient,
+    async_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MAX_QUEUE_DEPTH", "0")
+
+    for i in range(3):
+        response = await async_client.post(
+            "/response",
+            headers={"Authorization": f"Bearer {API_KEY}"},
+            json={"user_id": f"u-nobp-{i}", "input": "hello"},
+        )
+        assert response.status_code == 202

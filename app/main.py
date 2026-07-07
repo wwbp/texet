@@ -4,7 +4,7 @@ import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +17,7 @@ from app.config import (
     get_admin_secret_key,
     get_admin_session_ttl_seconds,
     mock_external_apis,
+    scheduler_enabled,
 )
 from app.console import console_router, init_console
 from app.db import get_async_session, ping_db
@@ -45,7 +46,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             "Load testing only; disable in production."
         )
     init_console(app)
-    start_scheduler()
+    if scheduler_enabled():
+        start_scheduler()
     try:
         yield
     finally:
@@ -108,10 +110,9 @@ app.include_router(console_router)
 )
 async def response(
     payload: ResponseRequest,
-    background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_async_session),
 ) -> ResponseQueuedResponse:
-    return await process_response(session, payload, background_tasks)
+    return await process_response(session, payload)
 
 
 @app.get("/", response_class=JSONResponse)

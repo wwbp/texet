@@ -16,14 +16,12 @@ from app.config import (
 from app.models.response import Utterance
 from app.response import service as response_service
 from app.response.crud import (
-    DEFAULT_SYSTEM_PROMPT,
     create_queued_utterance,
     create_utterance,
     get_or_create_bot_speaker,
     get_or_create_conversation,
     get_or_create_speaker,
 )
-from app.response.prompt import compose_instruction_prompt
 from app.response.utils import day_marker
 
 
@@ -356,75 +354,6 @@ async def test_run_deferred_reply_moderates_generated_reply_and_sends_notice(
         "utterance_id": bot_utterance_id,
         "in_reply_to_utterance_id": user_utterance_id,
     }
-
-
-@pytest.mark.asyncio
-async def test_drain_user_queue_processes_same_user_in_sequence(
-    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    calls: list[dict[str, object]] = []
-
-    async def _allow_moderation(_utterance: Utterance) -> tuple[bool, str, str, float]:
-        return False, "", "", 0.0
-
-    async def _allow_text_moderation(_text: str) -> tuple[bool, str, str, float]:
-        return False, "", "", 0.0
-
-    async def _fake_generate_reply(
-        chat_history: list[object], query: str, system_prompt: str, **_kwargs: object
-    ) -> str:
-        history = [
-            (msg.role.value, msg.content)  # type: ignore[attr-defined]
-            for msg in chat_history
-        ]
-        calls.append({"query": query, "history": history, "system_prompt": system_prompt})
-        return f"reply:{query}"
-
-    async def _fake_send_sms(
-        user_id: str,
-        message: str,
-        utterance_id: str,
-        in_reply_to_utterance_id: str | None = None,
-    ) -> None:
-        return None
-
-    monkeypatch.setattr(response_service, "_moderate_message", _allow_moderation)
-    monkeypatch.setattr(response_service, "_moderate_text", _allow_text_moderation)
-    monkeypatch.setattr(response_service, "_generate_reply", _fake_generate_reply)
-    monkeypatch.setattr(response_service, "_send_sms", _fake_send_sms)
-
-    async with async_session.begin():
-        speaker = await get_or_create_speaker(async_session, "u-bg-queue", meta={"type": "user"})
-        bot = await get_or_create_bot_speaker(async_session, "u-bg-queue")
-        conversation = await get_or_create_conversation(async_session, speaker.id)
-        first_user = await create_utterance(async_session, conversation.id, speaker.id, "one")
-        await create_queued_utterance(
-            async_session,
-            conversation.id,
-            bot.id,
-            reply_to_id=first_user.id,
-        )
-        second_user = await create_utterance(async_session, conversation.id, speaker.id, "two")
-        await create_queued_utterance(
-            async_session,
-            conversation.id,
-            bot.id,
-            reply_to_id=second_user.id,
-        )
-
-    sessionmaker = _sessionmaker_from(async_session)
-    await response_service._drain_user_queue("u-bg-queue", sessionmaker)
-
-    expected_system_prompt = compose_instruction_prompt(DEFAULT_SYSTEM_PROMPT)
-    today_marker = day_marker(datetime.datetime.now(datetime.UTC).date())
-    assert calls == [
-        {"query": "one", "history": [], "system_prompt": expected_system_prompt},
-        {
-            "query": "two",
-            "history": [("user", f"{today_marker}\none"), ("assistant", "reply:one")],
-            "system_prompt": expected_system_prompt,
-        },
-    ]
 
 
 @pytest.mark.asyncio

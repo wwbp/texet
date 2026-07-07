@@ -5,16 +5,10 @@ import logging
 from typing import Any, cast
 
 import httpx
-from fastapi import BackgroundTasks
+from fastapi import HTTPException
 from kani import ChatMessage, Kani  # type: ignore[import-untyped]
 from openai import AsyncOpenAI
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import (
-    AsyncConnection,
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-)
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import (
     MODERATION_VALUES_FOR_BLOCKED,
@@ -32,6 +26,7 @@ from app.config import (
     get_mail_use_credentials,
     get_mail_username,
     get_mail_validate_certs,
+    get_max_queue_depth,
     get_mock_llm_latency_ms,
     get_mock_moderation_latency_ms,
     get_mock_sms_latency_ms,
@@ -43,11 +38,10 @@ from app.config import (
     get_sms_timeout_seconds,
     mock_external_apis,
 )
-from app.db import get_sessionmaker
 from app.engines.factory import create_engine as _create_engine
 from app.models.response import Utterance
+from app.queue import count_pending_replies
 from app.response.crud import (
-    bot_speaker_id,
     build_chat_history,
     create_queued_utterance,
     create_utterance,
@@ -70,8 +64,6 @@ from app.response.utils import week_start_utc
 
 _logger = logging.getLogger(__name__)
 
-_USER_QUEUE_LOCKS: dict[str, asyncio.Lock] = {}
-_USER_QUEUE_LOCKS_GUARD = asyncio.Lock()
 
 
 def _merge_meta(
@@ -91,15 +83,6 @@ def _moderation_notice(source: str, category: str, score: float) -> str:
     if source == "bot":
         return f"A generated reply was moderated due to {category} content with score {score:.2f}."
     return "I can't personally help with that, but your safety matters, and support is available. Call the crisis line at 988 to talk to someone."
-
-
-async def _get_user_queue_lock(user_id: str) -> asyncio.Lock:
-    async with _USER_QUEUE_LOCKS_GUARD:
-        lock = _USER_QUEUE_LOCKS.get(user_id)
-        if lock is None:
-            lock = asyncio.Lock()
-            _USER_QUEUE_LOCKS[user_id] = lock
-        return lock
 
 
 async def _generate_reply(
@@ -442,22 +425,6 @@ async def _mark_bot_utterance_failed(
         await session.commit()
 
 
-async def _get_next_queued_bot_utterance(
-    session: AsyncSession,
-    user_id: str,
-) -> Utterance | None:
-    result = await session.execute(
-        select(Utterance)
-        .where(
-            Utterance.speaker_id == bot_speaker_id(user_id),
-            Utterance.status == UTTERANCE_STATUS_QUEUED,
-        )
-        .order_by(Utterance.timestamp, Utterance.id)
-        .limit(1)
-    )
-    return result.scalar_one_or_none()
-
-
 async def _process_queued_reply(
     sessionmaker: async_sessionmaker[AsyncSession],
     user_id: str,
@@ -637,40 +604,22 @@ async def _run_deferred_reply(
             await _mark_bot_utterance_failed(session, bot_utterance_id, exc)
 
 
-async def _drain_user_queue(
-    user_id: str,
-    sessionmaker: async_sessionmaker[AsyncSession],
-) -> None:
-    lock = await _get_user_queue_lock(user_id)
-    async with lock:
-        while True:
-            async with sessionmaker() as session:
-                bot_utterance = await _get_next_queued_bot_utterance(session, user_id)
-                if not bot_utterance:
-                    return
-                user_utterance = (
-                    await session.get(Utterance, bot_utterance.reply_to_id)
-                    if bot_utterance.reply_to_id
-                    else None
-                )
-            try:
-                if not bot_utterance.reply_to_id:
-                    raise RuntimeError("Queued bot utterance missing reply_to_id.")
-                if not user_utterance:
-                    raise RuntimeError("User utterance missing.")
-                await _process_queued_reply(sessionmaker, user_id, user_utterance, bot_utterance)
-            except Exception as exc:
-                async with sessionmaker() as session:
-                    await _mark_bot_utterance_failed(session, bot_utterance.id, exc)
-
-
 async def process_chat(
     session: AsyncSession,
     payload: ChatRequest,
-    background_tasks: BackgroundTasks,
     meta: dict[str, Any] | None = None,
 ) -> ChatQueuedResponse:
+    max_depth = get_max_queue_depth()
     async with session.begin():
+        if max_depth:
+            pending = await count_pending_replies(session)
+            if pending >= max_depth:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Reply queue is full. Retry later.",
+                    headers={"Retry-After": "30"},
+                )
+
         speaker = await get_or_create_speaker(session, payload.user_id, meta={"type": "user"})
         bot = await get_or_create_bot_speaker(session, payload.user_id)
 
@@ -692,22 +641,7 @@ async def process_chat(
             reply_to_id=user_utterance.id,
         )
 
-    bind = session.bind
-    if bind is None:
-        sessionmaker = get_sessionmaker()
-    else:
-        engine = bind.engine if isinstance(bind, AsyncConnection) else bind
-        sessionmaker = (
-            async_sessionmaker(engine, expire_on_commit=False)
-            if isinstance(engine, AsyncEngine)
-            else get_sessionmaker()
-        )
-    background_tasks.add_task(
-        _drain_user_queue,
-        payload.user_id,
-        sessionmaker,
-    )
-
+    # The reply is picked up by the worker service (app.worker) via app.queue.
     return ChatQueuedResponse(
         conversation_id=conversation.id,
         reply_utterance_id=bot_utterance.id,
@@ -747,15 +681,12 @@ async def _persist_initial_bot_message(
 async def process_response(
     session: AsyncSession,
     payload: ResponseRequest,
-    background_tasks: BackgroundTasks,
 ) -> ResponseQueuedResponse:
     if bool((payload.metadata or {}).get("is_initial")):
         return await _persist_initial_bot_message(session, payload)
 
     chat_request = ChatRequest(user_id=payload.user_id, message=payload.input)
-    chat_response = await process_chat(
-        session, chat_request, background_tasks, meta=payload.metadata
-    )
+    chat_response = await process_chat(session, chat_request, meta=payload.metadata)
     return ResponseQueuedResponse(
         id=chat_response.reply_utterance_id,
         object="response",

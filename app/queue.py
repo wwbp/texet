@@ -8,8 +8,9 @@ preserves per-user ordering across any number of worker processes.
 from __future__ import annotations
 
 import datetime
+from typing import Any, cast
 
-from sqlalchemy import func, select, text, update
+from sqlalchemy import CursorResult, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import (
@@ -80,8 +81,10 @@ async def reclaim_stale(
 
     Returns the number of replies re-queued.
     """
-    reclaim_seconds = reclaim_seconds if reclaim_seconds is not None else get_worker_reclaim_seconds()
-    max_attempts = max_attempts if max_attempts is not None else get_worker_max_attempts()
+    if reclaim_seconds is None:
+        reclaim_seconds = get_worker_reclaim_seconds()
+    if max_attempts is None:
+        max_attempts = get_worker_max_attempts()
     cutoff = datetime.datetime.now(datetime.UTC) - datetime.timedelta(seconds=reclaim_seconds)
 
     await session.execute(
@@ -97,13 +100,16 @@ async def reclaim_stale(
             error=f"Reply abandoned after {max_attempts} stale claims.",
         )
     )
-    requeued = await session.execute(
-        update(Utterance)
-        .where(
-            Utterance.status == UTTERANCE_STATUS_PROCESSING,
-            Utterance.claimed_at < cutoff,
-        )
-        .values(status=UTTERANCE_STATUS_QUEUED, claimed_at=None)
+    requeued = cast(
+        CursorResult[Any],
+        await session.execute(
+            update(Utterance)
+            .where(
+                Utterance.status == UTTERANCE_STATUS_PROCESSING,
+                Utterance.claimed_at < cutoff,
+            )
+            .values(status=UTTERANCE_STATUS_QUEUED, claimed_at=None)
+        ),
     )
     await session.commit()
     return int(requeued.rowcount or 0)

@@ -8,6 +8,7 @@ query in app.queue, not by process-local state.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import signal
 
@@ -68,10 +69,8 @@ async def _worker_loop(
             _logger.exception("Worker iteration failed.")
             processed = False
         if not processed:
-            try:
+            with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(shutdown.wait(), timeout=poll_interval)
-            except TimeoutError:
-                pass
 
 
 async def _reclaim_loop(
@@ -86,10 +85,8 @@ async def _reclaim_loop(
                 _logger.warning("Reclaimed %d stale reply claims.", requeued)
         except Exception:
             _logger.exception("Reclaim pass failed.")
-        try:
+        with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(shutdown.wait(), timeout=_RECLAIM_INTERVAL_SECONDS)
-        except TimeoutError:
-            pass
 
 
 async def run() -> None:
