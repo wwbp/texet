@@ -33,7 +33,7 @@ cp terraform.tfvars.example terraform.tfvars   # optional edits
 # 1. Create the infra (VPC, RDS, ECR, ECS, ALB). Services stay unhealthy until
 #    the image is pushed in step 2 — expected.
 terraform init
-terraform apply
+terraform apply   # scale via: -var api_desired_count=3 -var worker_count=3 -var worker_concurrency=80
 
 # 2. Build + push the texet image (linux/amd64) to the new ECR repo, then let
 #    ECS pull it.
@@ -41,6 +41,12 @@ terraform apply
 CLUSTER=$(terraform output -raw cluster_name)
 aws ecs update-service --cluster "$CLUSTER" --service "$(terraform output -raw api_service_name)"    --force-new-deployment
 aws ecs update-service --cluster "$CLUSTER" --service "$(terraform output -raw worker_service_name)" --force-new-deployment
+
+# NOTE on migrations: api tasks set SKIP_MIGRATIONS=true (so >1 api task doesn't
+# race). On a FRESH database, run migrations once as a one-off ECS task before
+# serving traffic (reuse the run-task pattern below with
+# command ["uv","run","alembic","upgrade","head"]). The load-test runs here
+# reused an already-migrated DB.
 
 # 3. Wait for the api to go healthy, then create an API key via ECS Exec.
 TASK=$(aws ecs list-tasks --cluster "$CLUSTER" --service-name "$(terraform output -raw api_service_name)" --query 'taskArns[0]' --output text)

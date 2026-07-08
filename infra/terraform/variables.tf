@@ -35,6 +35,12 @@ variable "api_memory" {
   default     = 1024
 }
 
+variable "api_desired_count" {
+  description = "Number of api tasks behind the ALB. >1 requires migrations to run out-of-band (api tasks set SKIP_MIGRATIONS)."
+  type        = number
+  default     = 1
+}
+
 variable "worker_cpu" {
   description = "Fargate CPU units per worker task."
   type        = number

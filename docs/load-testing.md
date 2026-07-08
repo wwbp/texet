@@ -216,6 +216,82 @@ polled continuously across 240 worker coroutines plus per-reply context reads.
 Worker CPU was uneven (one replica often near-idle) because idle pollers lose
 `SKIP LOCKED` races. Both point to the same fix below.
 
+## Round 4: on AWS (ECS Fargate, mock mode)
+
+Same code, deployed to real infra via the Terraform in `infra/terraform/` — an
+isolated stack (own VPC + RDS Postgres, ALB, ECR) with **api and worker as
+separate Fargate services**. Mock mode on (`MOCK_EXTERNAL_APIS=true`). Load
+driven from a laptop against the ALB. This surfaced things the local runs
+couldn't: a real load balancer, network hops, and Fargate vCPU sizing.
+
+### AWS run 1 — 1 api task @ 0.5 vCPU, 3 workers @ concurrency 80: api starved
+
+| Metric | Result |
+|---|---|
+| Throughput | ~17.5 rps (target ~91) |
+| Failures | 43.6% — client **10 s timeouts** |
+| `/response` p50 / p95 | 6.2 s / 10 s |
+| api CPU | ~0.4% (idle) yet `/health` slow (p50 370 ms) |
+| worker CPU | ~90% ; RDS ~63% |
+
+Diagnosis: a single 0.5-vCPU api task couldn't accept 500 concurrent
+connections behind the ALB — requests queued and timed out while the task
+itself sat idle (connection-bound, not CPU-bound). The load never really
+reached the queue. **A provisioning gap that only shows up on real infra** —
+locally the api had a full fast core and no load balancer.
+
+### AWS run 2 — 3 api tasks @ 1 vCPU (migrations moved off the api), workers @ concurrency 40
+
+| Metric | Run 1 | Run 2 |
+|---|---|---|
+| Accepted throughput | 17.5 rps | **97.5 rps aggregate / 88.6 on `/response`** (≈ target) |
+| `/response` p50 / p95 / p99 | 6.2 s / 10 s / — | **340 ms / 850 ms / 2.7 s** |
+| `/health` p50 | 370 ms | **40 ms** |
+| Failures | 43.6% timeouts | **40.3%, all clean 503 backpressure** (zero timeouts) |
+| api / worker / RDS CPU | 0.4% / 90% / 63% | **~50% / ~24% / ~62%** (all headroom) |
+
+Scaling the api tier fixed the starvation: throughput 17→**97 rps**, p50
+6.2 s→**340 ms**, and — importantly — the failures **converted from timeouts
+(collapse) to 503s (intentional load-shedding)**. The api now accepts fast and
+sheds excess cleanly instead of hanging.
+
+Why 40% 503s: I over-corrected worker concurrency down to 40 (3 × 40 = 120
+reply slots; at 2.25 s mock latency that caps completion at ~53 replies/s,
+below the ~89 rps offered), so the queue hit `MAX_QUEUE_DEPTH` and shed the
+rest. Worker CPU was only ~24% — they're **connection/slot-bound, not
+CPU-bound** — so the fix is simply more reply slots.
+
+### AWS run 3 — workers @ concurrency 80 (3 × 80 = 240 slots): DB becomes the ceiling
+
+| Metric | Run 2 (120 slots) | Run 3 (240 slots) |
+|---|---|---|
+| Accepted throughput | 88.6 rps | **88.4 rps on `/response`** (97.4 agg) |
+| 503 shed | 40.3% | **8.3%** |
+| `/response` p50 / p95 / p99 | 340 ms / 850 ms / 2.7 s | **260 ms / 1.4 s / 3.9 s** |
+| `/health` p50 | 40 ms | **28 ms** |
+| timeouts | 0 | **1** |
+| api / worker CPU | 50% / 24% | ~36% / ~55% |
+| **RDS CPU** | ~62% | **78–91% (the ceiling)** |
+
+Doubling worker slots cut shedding from 40% → **8%**, and the remaining 8% is
+because **RDS CPU hit ~91%** — the api (~36%) and workers (~55%) both had
+headroom, so Postgres is now the bottleneck. This is the **same conclusion as
+local run 5b, reproduced on real infra**: with the api and worker tiers sized to
+the load, the DB is the ultimate ceiling, and the small overflow is shed as
+clean 503s (p50 stayed 260 ms, one timeout).
+
+**Net across the three AWS runs:** the architecture behaves exactly as designed
+on Fargate. Run 1 → 2 (scale the api) removed connection starvation
+(17 → 97 rps, timeouts → 503s); run 2 → 3 (scale worker slots) cut load-shedding
+40% → 8% and exposed **Postgres CPU as the real ceiling**. The knobs that matter,
+in order: api task count/size (connection capacity), worker slots (reply
+capacity), then the DB — which is where the `LISTEN/NOTIFY` / claim-query
+optimization from round 3 would pay off to push past ~90 rps on this instance.
+
+Migration note: with >1 api task, the api tasks set `SKIP_MIGRATIONS=true` and
+`alembic upgrade head` runs as a one-off ECS task, so multiple api tasks don't
+race on startup.
+
 ## Scaling guidance for deployment
 
 Shipping now (round 3): worker service, `FOR UPDATE SKIP LOCKED` queue, 503

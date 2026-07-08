@@ -12,10 +12,12 @@ resource "aws_ecs_cluster" "main" {
 locals {
   image = "${aws_ecr_repository.texet.repository_url}:${var.image_tag}"
 
-  # api runs FastAPI (mock mode) and owns migrations via the Dockerfile entrypoint.
+  # api runs FastAPI (mock mode). Migrations run out-of-band (a one-off task) so
+  # the api can scale to multiple tasks without racing on `alembic upgrade head`.
   api_env = merge(local.common_env, {
     MAX_QUEUE_DEPTH   = tostring(var.max_queue_depth)
     SCHEDULER_ENABLED = "true"
+    SKIP_MIGRATIONS   = "true"
   })
 
   # worker skips migrations (entrypoint guard) and runs the reply loop.
@@ -89,12 +91,12 @@ resource "aws_ecs_service" "api" {
   name            = "${local.name_prefix}-api"
   cluster         = aws_ecs_cluster.main.id
   task_definition = aws_ecs_task_definition.api.arn
-  desired_count   = 1
+  desired_count   = var.api_desired_count
   launch_type     = "FARGATE"
 
   enable_execute_command             = true
-  health_check_grace_period_seconds  = 120 # allow alembic upgrade on boot
-  deployment_minimum_healthy_percent = 0   # single task: allow replace on redeploy
+  health_check_grace_period_seconds  = 120
+  deployment_minimum_healthy_percent = 0 # single task: allow replace on redeploy
   deployment_maximum_percent         = 200
 
   network_configuration {
