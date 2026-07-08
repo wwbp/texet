@@ -75,12 +75,33 @@ jobs:
           DEPLOYED_STATUS: ${{ steps.eb_deploy.outputs['environment-status'] }}
           DEPLOYED_HEALTH: ${{ steps.eb_deploy.outputs['environment-health'] }}
           TARGET_VERSION: ${{ github.event.workflow_run.head_sha }}
+          ENV_NAME: ${{ secrets.AWS_PROD_BACKEND_ENVIRONMENT_NAME }}
         run: |
           set -euo pipefail
           echo "Deployed version=${DEPLOYED_VERSION}, status=${DEPLOYED_STATUS}, health=${DEPLOYED_HEALTH}"
           test "${DEPLOYED_VERSION}" = "${TARGET_VERSION}"
           test "${DEPLOYED_STATUS}" = "Ready"
-          test "${DEPLOYED_HEALTH}" = "Green"
+
+          # Health can briefly read Yellow right after a deploy while EB settles,
+          # so poll until it reaches Green rather than asserting a single snapshot.
+          if [ "${DEPLOYED_HEALTH}" = "Green" ]; then
+            echo "Environment health is Green."
+            exit 0
+          fi
+          echo "Health is ${DEPLOYED_HEALTH}; polling until Green (up to 5 min)..."
+          for i in $(seq 1 30); do
+            sleep 10
+            health="$(aws elasticbeanstalk describe-environments \
+              --environment-names "${ENV_NAME}" \
+              --query 'Environments[0].Health' --output text)"
+            echo "  [$((i*10))s] health=${health}"
+            if [ "${health}" = "Green" ]; then
+              echo "Environment health reached Green."
+              exit 0
+            fi
+          done
+          echo "Environment did not reach Green health within the timeout."
+          exit 1
 
       - name: Smoke test deployed /health endpoint
         env:
