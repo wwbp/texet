@@ -304,11 +304,12 @@ Remaining, in priority order:
 
 1. **Postgres CPU is the next ceiling (~100 rps on one DB core-and-a-half).**
    The dominant cost is the claim query polled by every worker coroutine.
-   Biggest win: replace polling with `LISTEN/NOTIFY` (workers sleep until the
-   API notifies on insert) so idle workers issue zero claim queries — this also
-   fixes the uneven-worker-CPU races. Then simplify the claim query if needed,
-   and scale the DB (bigger instance / read replica for context reads) before
-   pushing past ~150 rps.
+   **Done:** idle workers now sleep on `LISTEN/NOTIFY` (`app/queue.py`
+   `NOTIFY_CHANNEL`; the API notifies on enqueue) with only a slow fallback
+   poll, so an idle/light-traffic fleet issues ~no claim queries instead of
+   `workers × 1/poll_interval` per second. Remaining DB levers for pushing past
+   ~100 rps under sustained load: simplify the claim query, and scale the DB
+   (bigger instance / read replica for context reads).
 2. **Tune worker fleet to offered load.** Required reply slots ≈ target msg/s ×
    external-latency seconds (use observed p95 LLM latency). Spread across
    replicas; keep each worker's `DB_POOL_SIZE`+overflow above its steady-state
