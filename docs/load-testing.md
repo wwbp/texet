@@ -314,9 +314,13 @@ Remaining, in priority order:
    replicas; keep each worker's `DB_POOL_SIZE`+overflow above its steady-state
    active-connection count (well under `WORKER_CONCURRENCY`, since each reply
    holds a connection only briefly).
-3. **Multiple API replicas are now safe** except the scheduler: set
-   `SCHEDULER_ENABLED=false` on all but one so the weekly-summary cron runs
-   once. Workers never run it.
+3. **Multiple instances/replicas are safe.** Reply processing coordinates
+   through the Postgres queue (no per-process lock), and the weekly-summary
+   scheduler is leader-elected via a Postgres advisory lock
+   (`app/scheduler.py`) so it runs on exactly one instance regardless of count
+   — no per-instance config needed. Size each instance's `DB_POOL_SIZE` +
+   `DB_MAX_OVERFLOW` so `instances × (pool + overflow)` stays under the RDS
+   `max_connections` budget.
 4. **Consider capping chat history** at the N most recent messages instead of
    the full week — reads are indexed and cheap, but prompt size (LLM
    cost/latency) still grows linearly with conversation length.
