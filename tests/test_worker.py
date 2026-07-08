@@ -151,7 +151,10 @@ async def test_worker_loop_processes_until_shutdown(
     sessionmaker = _sessionmaker_from(async_session)
 
     shutdown = asyncio.Event()
-    task = asyncio.create_task(worker._worker_loop(sessionmaker, shutdown, poll_interval=0.05))
+    notify_event = asyncio.Event()
+    task = asyncio.create_task(
+        worker._worker_loop(sessionmaker, shutdown, notify_event, poll_interval=0.05)
+    )
 
     async def _wait_for_sent() -> None:
         while True:

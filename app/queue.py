@@ -22,6 +22,21 @@ from app.config import (
 )
 from app.models.response import Utterance
 
+# Postgres LISTEN/NOTIFY channel: the API notifies on this after enqueuing a
+# reply so idle workers wake immediately instead of polling. Fixed identifier
+# (not user input) — safe to interpolate into NOTIFY/LISTEN.
+NOTIFY_CHANNEL = "texet_reply_queued"
+
+
+async def notify_reply_queued(session: AsyncSession) -> None:
+    """Signal listening workers that a reply was enqueued.
+
+    NOTIFY is delivered on transaction commit, so call this inside the same
+    transaction that inserts the queued utterance.
+    """
+    await session.execute(text(f"NOTIFY {NOTIFY_CHANNEL}"))
+
+
 _CLAIM_SQL = text(
     """
     WITH next AS (

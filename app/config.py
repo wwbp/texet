@@ -157,16 +157,18 @@ def get_worker_concurrency() -> int:
     return value if value > 0 else 20
 
 
-# WORKER_POLL_INTERVAL_SECONDS: sleep between claim attempts when the queue is empty.
+# WORKER_POLL_INTERVAL_SECONDS: fallback sleep when the queue is empty. Idle
+# workers normally wake on a LISTEN/NOTIFY signal (app.queue.NOTIFY_CHANNEL);
+# this interval only bounds latency for missed notifications and reclaimed items.
 def get_worker_poll_interval_seconds() -> float:
     value = os.getenv("WORKER_POLL_INTERVAL_SECONDS")
     if not value:
-        return 0.5
+        return 2.0
     try:
         parsed = float(value)
     except ValueError:
-        return 0.5
-    return parsed if parsed >= 0.05 else 0.5
+        return 2.0
+    return parsed if parsed >= 0.05 else 2.0
 
 
 # WORKER_RECLAIM_SECONDS: visibility timeout after which a stale 'processing'

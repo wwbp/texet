@@ -40,7 +40,7 @@ from app.config import (
 )
 from app.engines.factory import create_engine as _create_engine
 from app.models.response import Utterance
-from app.queue import count_pending_replies
+from app.queue import count_pending_replies, notify_reply_queued
 from app.response.crud import (
     build_chat_history,
     create_queued_utterance,
@@ -640,6 +640,10 @@ async def process_chat(
             bot.id,
             reply_to_id=user_utterance.id,
         )
+
+        # Wake listening workers (delivered on commit); fallback poll covers
+        # any missed notification.
+        await notify_reply_queued(session)
 
     # The reply is picked up by the worker service (app.worker) via app.queue.
     return ChatQueuedResponse(

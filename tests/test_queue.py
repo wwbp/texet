@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 
+import asyncpg  # type: ignore[import-untyped]
 import pytest
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker
 
@@ -14,6 +15,7 @@ from app.config import (
     UTTERANCE_STATUS_SENT,
 )
 from app.models.response import Utterance
+from app.queue import NOTIFY_CHANNEL, notify_reply_queued
 from app.response.crud import (
     create_queued_utterance,
     create_utterance,
@@ -198,3 +200,22 @@ async def test_count_pending_replies_counts_queued_and_processing(
         sent.status = UTTERANCE_STATUS_SENT
 
     assert await queue.count_pending_replies(async_session) == 3
+
+@pytest.mark.asyncio
+async def test_notify_reply_queued_is_received_by_a_listener(
+    async_session: AsyncSession,
+) -> None:
+    """A LISTEN connection receives the NOTIFY the API issues on enqueue."""
+    engine = _sessionmaker_from(async_session).kw["bind"]
+    dsn = engine.url.render_as_string(hide_password=False).replace("+asyncpg", "", 1)
+
+    received = asyncio.Event()
+    conn = await asyncpg.connect(dsn)
+    try:
+        await conn.add_listener(NOTIFY_CHANNEL, lambda *_a: received.set())
+        async with async_session.begin():
+            await notify_reply_queued(async_session)
+        await asyncio.wait_for(received.wait(), timeout=5)
+        assert received.is_set()
+    finally:
+        await conn.close()
