@@ -113,6 +113,84 @@ def get_openai_model() -> str:
     return os.getenv("OPENAI_MODEL", "")
 
 
+# MOCK_EXTERNAL_APIS: replace LLM generation, moderation, and outbound SMS with
+# in-process fakes that simulate latency. Load testing only — never set in production.
+def mock_external_apis() -> bool:
+    return os.getenv("MOCK_EXTERNAL_APIS", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _get_non_negative_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if not value:
+        return default
+    try:
+        parsed = int(value)
+    except ValueError:
+        return default
+    return parsed if parsed >= 0 else default
+
+
+# MOCK_LLM_LATENCY_MS: simulated LLM generation latency when MOCK_EXTERNAL_APIS is on.
+def get_mock_llm_latency_ms() -> int:
+    return _get_non_negative_int("MOCK_LLM_LATENCY_MS", 1500)
+
+
+# MOCK_MODERATION_LATENCY_MS: simulated moderation latency when MOCK_EXTERNAL_APIS is on.
+def get_mock_moderation_latency_ms() -> int:
+    return _get_non_negative_int("MOCK_MODERATION_LATENCY_MS", 300)
+
+
+# MOCK_SMS_LATENCY_MS: simulated outbound SMS latency when MOCK_EXTERNAL_APIS is on.
+def get_mock_sms_latency_ms() -> int:
+    return _get_non_negative_int("MOCK_SMS_LATENCY_MS", 150)
+
+
+# MAX_QUEUE_DEPTH: /response returns 503 while queued+processing replies exceed
+# this count. 0 disables backpressure.
+def get_max_queue_depth() -> int:
+    return _get_non_negative_int("MAX_QUEUE_DEPTH", 1000)
+
+
+# WORKER_CONCURRENCY: concurrent claim/process loops per worker process.
+def get_worker_concurrency() -> int:
+    value = _get_non_negative_int("WORKER_CONCURRENCY", 20)
+    return value if value > 0 else 20
+
+
+# WORKER_POLL_INTERVAL_SECONDS: sleep between claim attempts when the queue is empty.
+def get_worker_poll_interval_seconds() -> float:
+    value = os.getenv("WORKER_POLL_INTERVAL_SECONDS")
+    if not value:
+        return 0.5
+    try:
+        parsed = float(value)
+    except ValueError:
+        return 0.5
+    return parsed if parsed >= 0.05 else 0.5
+
+
+# WORKER_RECLAIM_SECONDS: visibility timeout after which a stale 'processing'
+# claim is returned to the queue (or failed once out of attempts).
+def get_worker_reclaim_seconds() -> int:
+    value = _get_non_negative_int("WORKER_RECLAIM_SECONDS", 300)
+    return value if value > 0 else 300
+
+
+# WORKER_MAX_ATTEMPTS: claim attempts before a reply is marked failed.
+def get_worker_max_attempts() -> int:
+    value = _get_non_negative_int("WORKER_MAX_ATTEMPTS", 3)
+    return value if value > 0 else 3
+
+
+# SCHEDULER_ENABLED: run the APScheduler cron jobs in this API process. Set to
+# false on all but one replica when running multiple API instances.
+def scheduler_enabled() -> bool:
+    value = os.getenv("SCHEDULER_ENABLED")
+    if value is None:
+        return True
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 # ADMIN_USERNAME: username for SQLAdmin login.
 def get_admin_username() -> str:
     return os.getenv("ADMIN_USERNAME", "")
@@ -146,6 +224,7 @@ def admin_enabled() -> bool:
 
 UTTERANCE_STATUS_RECEIVED: Final[Literal["received"]] = "received"
 UTTERANCE_STATUS_QUEUED: Final[Literal["queued"]] = "queued"
+UTTERANCE_STATUS_PROCESSING: Final[Literal["processing"]] = "processing"
 UTTERANCE_STATUS_SENT: Final[Literal["sent"]] = "sent"
 UTTERANCE_STATUS_MODERATED: Final[Literal["moderated"]] = "moderated"
 UTTERANCE_STATUS_FAILED: Final[Literal["failed"]] = "failed"
@@ -153,6 +232,7 @@ UTTERANCE_STATUS_FAILED: Final[Literal["failed"]] = "failed"
 UTTERANCE_STATUSES = (
     UTTERANCE_STATUS_RECEIVED,
     UTTERANCE_STATUS_QUEUED,
+    UTTERANCE_STATUS_PROCESSING,
     UTTERANCE_STATUS_SENT,
     UTTERANCE_STATUS_MODERATED,
     UTTERANCE_STATUS_FAILED,

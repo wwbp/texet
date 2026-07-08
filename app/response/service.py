@@ -5,16 +5,10 @@ import logging
 from typing import Any, cast
 
 import httpx
-from fastapi import BackgroundTasks
+from fastapi import HTTPException
 from kani import ChatMessage, Kani  # type: ignore[import-untyped]
 from openai import AsyncOpenAI
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import (
-    AsyncConnection,
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-)
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import (
     MODERATION_VALUES_FOR_BLOCKED,
@@ -32,18 +26,22 @@ from app.config import (
     get_mail_use_credentials,
     get_mail_username,
     get_mail_validate_certs,
+    get_max_queue_depth,
+    get_mock_llm_latency_ms,
+    get_mock_moderation_latency_ms,
+    get_mock_sms_latency_ms,
     get_moderation_alert_emails,
     get_openai_api_key,
     get_public_app_url,
     get_sms_outbound_authorization,
     get_sms_outbound_url,
     get_sms_timeout_seconds,
+    mock_external_apis,
 )
-from app.db import get_sessionmaker
 from app.engines.factory import create_engine as _create_engine
 from app.models.response import Utterance
+from app.queue import count_pending_replies
 from app.response.crud import (
-    bot_speaker_id,
     build_chat_history,
     create_queued_utterance,
     create_utterance,
@@ -66,8 +64,6 @@ from app.response.utils import week_start_utc
 
 _logger = logging.getLogger(__name__)
 
-_USER_QUEUE_LOCKS: dict[str, asyncio.Lock] = {}
-_USER_QUEUE_LOCKS_GUARD = asyncio.Lock()
 
 
 def _merge_meta(
@@ -89,15 +85,6 @@ def _moderation_notice(source: str, category: str, score: float) -> str:
     return "I can't personally help with that, but your safety matters, and support is available. Call the crisis line at 988 to talk to someone."
 
 
-async def _get_user_queue_lock(user_id: str) -> asyncio.Lock:
-    async with _USER_QUEUE_LOCKS_GUARD:
-        lock = _USER_QUEUE_LOCKS.get(user_id)
-        if lock is None:
-            lock = asyncio.Lock()
-            _USER_QUEUE_LOCKS[user_id] = lock
-        return lock
-
-
 async def _generate_reply(
     chat_history: list[ChatMessage],
     query: str,
@@ -106,6 +93,10 @@ async def _generate_reply(
     provider: str = "openai",
     model_id: str = "gpt-4o-mini",
 ) -> str:
+    if mock_external_apis():
+        await asyncio.sleep(get_mock_llm_latency_ms() / 1000)
+        return f"[mock {provider}/{model_id}] Echo: {query[:120]}"
+
     engine = _create_engine(provider, model_id)
     kani = Kani(engine=engine, system_prompt=system_prompt, chat_history=chat_history)
 
@@ -157,6 +148,10 @@ async def _send_sms(
     utterance_id: str,
     in_reply_to_utterance_id: str | None = None,
 ) -> None:
+    if mock_external_apis():
+        await asyncio.sleep(get_mock_sms_latency_ms() / 1000)
+        return
+
     url = get_sms_outbound_url()
     if not url:
         raise RuntimeError("SMS_OUTBOUND_URL is not set.")
@@ -186,6 +181,10 @@ async def _close_async_openai_client(client: AsyncOpenAI) -> None:
 
 
 async def _moderate_text(text: str) -> tuple[bool, str, str, float]:
+    if mock_external_apis():
+        await asyncio.sleep(get_mock_moderation_latency_ms() / 1000)
+        return False, "", "", 0.0
+
     api_key = get_openai_api_key()
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY is not set.")
@@ -426,24 +425,8 @@ async def _mark_bot_utterance_failed(
         await session.commit()
 
 
-async def _get_next_queued_bot_utterance(
-    session: AsyncSession,
-    user_id: str,
-) -> Utterance | None:
-    result = await session.execute(
-        select(Utterance)
-        .where(
-            Utterance.speaker_id == bot_speaker_id(user_id),
-            Utterance.status == UTTERANCE_STATUS_QUEUED,
-        )
-        .order_by(Utterance.timestamp, Utterance.id)
-        .limit(1)
-    )
-    return result.scalar_one_or_none()
-
-
 async def _process_queued_reply(
-    session: AsyncSession,
+    sessionmaker: async_sessionmaker[AsyncSession],
     user_id: str,
     user_utterance: Utterance,
     bot_utterance: Utterance,
@@ -451,15 +434,58 @@ async def _process_queued_reply(
     if user_utterance.text is None:
         raise RuntimeError("User utterance text missing.")
 
-    blocked, _, blocked_category, blocked_score = await _moderate_message(user_utterance)
-    if blocked:
-        moderation_notice = _moderation_notice("user", blocked_category, blocked_score)
-        blocked_history = await build_chat_history(
+    now_utc = datetime.datetime.now(datetime.UTC)
+    current_week_start = week_start_utc(now_utc)
+    prev_week_start = current_week_start - datetime.timedelta(days=7)
+    week_start_dt = datetime.datetime.combine(
+        current_week_start, datetime.time.min, tzinfo=datetime.UTC
+    )
+
+    day_number: int | None = None
+    user_local_time: str | None = None
+    if user_utterance.meta:
+        raw = user_utterance.meta.get("day_number")
+        if isinstance(raw, int):
+            day_number = raw
+        raw_time = user_utterance.meta.get("user_local_time")
+        if isinstance(raw_time, str):
+            user_local_time = raw_time
+
+    # Gather all prompt/history context in one short-lived session so no pool
+    # connection is held during the moderation/LLM calls below — connection
+    # demand scales with pool_size / hold_seconds (see docs/load-testing.md).
+    async with sessionmaker() as session:
+        prev_summary = await get_weekly_summary(session, user_id, prev_week_start)
+        sp = await get_latest_system_prompt(session)
+        base_prompt = await get_or_create_system_prompt(session)
+        daily_prompt = (
+            await get_daily_prompt(session, day_number) if day_number is not None else None
+        )
+        chat_history = await build_chat_history(
             session,
             conversation_id=user_utterance.conversation_id,
             user_id=user_id,
             up_to_timestamp=user_utterance.timestamp,
+            exclude_utterance_id=user_utterance.id,
+            since_timestamp=week_start_dt,
+            annotate_days=True,
         )
+        await session.commit()
+
+    provider = sp.provider if sp else "openai"
+    model_id = sp.model_id if sp else "gpt-4o-mini"
+    daily_content = daily_prompt.content if daily_prompt else None
+
+    blocked, _, blocked_category, blocked_score = await _moderate_message(user_utterance)
+    if blocked:
+        moderation_notice = _moderation_notice("user", blocked_category, blocked_score)
+        async with sessionmaker() as session:
+            blocked_history = await build_chat_history(
+                session,
+                conversation_id=user_utterance.conversation_id,
+                user_id=user_id,
+                up_to_timestamp=user_utterance.timestamp,
+            )
         try:
             await _send_moderation_email(
                 user_id=user_id,
@@ -478,58 +504,27 @@ async def _process_queued_reply(
                 user_utterance.id,
                 exc_info=True,
             )
-        user_utterance.status = UTTERANCE_STATUS_MODERATED
-        user_utterance.meta = _merge_meta(
-            user_utterance.meta,
-            {
-                "texet_moderation_source": "user",
-                "texet_moderation_category": blocked_category,
-                "texet_moderation_score": blocked_score,
-            },
-        )
-        await _persist_and_send_bot_reply(
-            session=session,
-            user_id=user_id,
-            bot_utterance_id=bot_utterance.id,
-            stored_text=moderation_notice,
-            delivered_text=moderation_notice,
-            final_status=UTTERANCE_STATUS_MODERATED,
-            in_reply_to_utterance_id=user_utterance.id,
-            meta_updates={
-                "texet_moderation_source": "user",
-                "texet_moderation_category": blocked_category,
-                "texet_moderation_score": blocked_score,
-            },
-        )
+        moderation_meta = {
+            "texet_moderation_source": "user",
+            "texet_moderation_category": blocked_category,
+            "texet_moderation_score": blocked_score,
+        }
+        async with sessionmaker() as session:
+            db_user_utterance = await session.get(Utterance, user_utterance.id)
+            if db_user_utterance:
+                db_user_utterance.status = UTTERANCE_STATUS_MODERATED
+                db_user_utterance.meta = _merge_meta(db_user_utterance.meta, moderation_meta)
+            await _persist_and_send_bot_reply(
+                session=session,
+                user_id=user_id,
+                bot_utterance_id=bot_utterance.id,
+                stored_text=moderation_notice,
+                delivered_text=moderation_notice,
+                final_status=UTTERANCE_STATUS_MODERATED,
+                in_reply_to_utterance_id=user_utterance.id,
+                meta_updates=moderation_meta,
+            )
         return
-
-    now_utc = datetime.datetime.now(datetime.UTC)
-    current_week_start = week_start_utc(now_utc)
-    prev_week_start = current_week_start - datetime.timedelta(days=7)
-    week_start_dt = datetime.datetime.combine(
-        current_week_start, datetime.time.min, tzinfo=datetime.UTC
-    )
-
-    prev_summary = await get_weekly_summary(session, user_id, prev_week_start)
-    sp = await get_latest_system_prompt(session)
-    base_prompt = await get_or_create_system_prompt(session)
-    provider = sp.provider if sp else "openai"
-    model_id = sp.model_id if sp else "gpt-4o-mini"
-
-    day_number: int | None = None
-    user_local_time: str | None = None
-    if user_utterance.meta:
-        raw = user_utterance.meta.get("day_number")
-        if isinstance(raw, int):
-            day_number = raw
-        raw_time = user_utterance.meta.get("user_local_time")
-        if isinstance(raw_time, str):
-            user_local_time = raw_time
-
-    daily_prompt = (
-        await get_daily_prompt(session, day_number) if day_number is not None else None
-    )
-    daily_content = daily_prompt.content if daily_prompt else None
 
     system_prompt = compose_instruction_prompt(
         base=base_prompt,
@@ -539,15 +534,6 @@ async def _process_queued_reply(
         day_number=day_number,
     )
 
-    chat_history = await build_chat_history(
-        session,
-        conversation_id=user_utterance.conversation_id,
-        user_id=user_id,
-        up_to_timestamp=user_utterance.timestamp,
-        exclude_utterance_id=user_utterance.id,
-        since_timestamp=week_start_dt,
-        annotate_days=True,
-    )
     generation_snapshot = _build_generation_snapshot(
         chat_history,
         user_utterance.text,
@@ -566,34 +552,36 @@ async def _process_queued_reply(
     reply_blocked, _, blocked_category, blocked_score = await _moderate_text(reply_text)
     if reply_blocked:
         moderation_notice = _moderation_notice("bot", blocked_category, blocked_score)
+        async with sessionmaker() as session:
+            await _persist_and_send_bot_reply(
+                session=session,
+                user_id=user_id,
+                bot_utterance_id=bot_utterance.id,
+                stored_text=reply_text,
+                delivered_text=moderation_notice,
+                final_status=UTTERANCE_STATUS_MODERATED,
+                in_reply_to_utterance_id=user_utterance.id,
+                meta_updates={
+                    "texet_generation": generation_snapshot,
+                    "texet_moderation_source": "bot",
+                    "texet_moderation_category": blocked_category,
+                    "texet_moderation_score": blocked_score,
+                    "texet_moderation_notice": moderation_notice,
+                },
+            )
+        return
+
+    async with sessionmaker() as session:
         await _persist_and_send_bot_reply(
             session=session,
             user_id=user_id,
             bot_utterance_id=bot_utterance.id,
             stored_text=reply_text,
-            delivered_text=moderation_notice,
-            final_status=UTTERANCE_STATUS_MODERATED,
+            delivered_text=reply_text,
+            final_status=UTTERANCE_STATUS_SENT,
             in_reply_to_utterance_id=user_utterance.id,
-            meta_updates={
-                "texet_generation": generation_snapshot,
-                "texet_moderation_source": "bot",
-                "texet_moderation_category": blocked_category,
-                "texet_moderation_score": blocked_score,
-                "texet_moderation_notice": moderation_notice,
-            },
+            meta_updates={"texet_generation": generation_snapshot},
         )
-        return
-
-    await _persist_and_send_bot_reply(
-        session=session,
-        user_id=user_id,
-        bot_utterance_id=bot_utterance.id,
-        stored_text=reply_text,
-        delivered_text=reply_text,
-        final_status=UTTERANCE_STATUS_SENT,
-        in_reply_to_utterance_id=user_utterance.id,
-        meta_updates={"texet_generation": generation_snapshot},
-    )
 
 
 async def _run_deferred_reply(
@@ -602,48 +590,36 @@ async def _run_deferred_reply(
     bot_utterance_id: str,
     sessionmaker: async_sessionmaker[AsyncSession],
 ) -> None:
-    async with sessionmaker() as session:
-        try:
+    try:
+        async with sessionmaker() as session:
             user_utterance = await session.get(Utterance, user_utterance_id)
             if not user_utterance:
                 raise RuntimeError("User utterance missing.")
             bot_utterance = await session.get(Utterance, bot_utterance_id)
             if not bot_utterance:
                 raise RuntimeError("Bot utterance missing.")
-            await _process_queued_reply(session, user_id, user_utterance, bot_utterance)
-        except Exception as exc:
+        await _process_queued_reply(sessionmaker, user_id, user_utterance, bot_utterance)
+    except Exception as exc:
+        async with sessionmaker() as session:
             await _mark_bot_utterance_failed(session, bot_utterance_id, exc)
-
-
-async def _drain_user_queue(
-    user_id: str,
-    sessionmaker: async_sessionmaker[AsyncSession],
-) -> None:
-    lock = await _get_user_queue_lock(user_id)
-    async with lock:
-        while True:
-            async with sessionmaker() as session:
-                bot_utterance = await _get_next_queued_bot_utterance(session, user_id)
-                if not bot_utterance:
-                    return
-                try:
-                    if not bot_utterance.reply_to_id:
-                        raise RuntimeError("Queued bot utterance missing reply_to_id.")
-                    user_utterance = await session.get(Utterance, bot_utterance.reply_to_id)
-                    if not user_utterance:
-                        raise RuntimeError("User utterance missing.")
-                    await _process_queued_reply(session, user_id, user_utterance, bot_utterance)
-                except Exception as exc:
-                    await _mark_bot_utterance_failed(session, bot_utterance.id, exc)
 
 
 async def process_chat(
     session: AsyncSession,
     payload: ChatRequest,
-    background_tasks: BackgroundTasks,
     meta: dict[str, Any] | None = None,
 ) -> ChatQueuedResponse:
+    max_depth = get_max_queue_depth()
     async with session.begin():
+        if max_depth:
+            pending = await count_pending_replies(session)
+            if pending >= max_depth:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Reply queue is full. Retry later.",
+                    headers={"Retry-After": "30"},
+                )
+
         speaker = await get_or_create_speaker(session, payload.user_id, meta={"type": "user"})
         bot = await get_or_create_bot_speaker(session, payload.user_id)
 
@@ -665,22 +641,7 @@ async def process_chat(
             reply_to_id=user_utterance.id,
         )
 
-    bind = session.bind
-    if bind is None:
-        sessionmaker = get_sessionmaker()
-    else:
-        engine = bind.engine if isinstance(bind, AsyncConnection) else bind
-        sessionmaker = (
-            async_sessionmaker(engine, expire_on_commit=False)
-            if isinstance(engine, AsyncEngine)
-            else get_sessionmaker()
-        )
-    background_tasks.add_task(
-        _drain_user_queue,
-        payload.user_id,
-        sessionmaker,
-    )
-
+    # The reply is picked up by the worker service (app.worker) via app.queue.
     return ChatQueuedResponse(
         conversation_id=conversation.id,
         reply_utterance_id=bot_utterance.id,
@@ -720,15 +681,12 @@ async def _persist_initial_bot_message(
 async def process_response(
     session: AsyncSession,
     payload: ResponseRequest,
-    background_tasks: BackgroundTasks,
 ) -> ResponseQueuedResponse:
     if bool((payload.metadata or {}).get("is_initial")):
         return await _persist_initial_bot_message(session, payload)
 
     chat_request = ChatRequest(user_id=payload.user_id, message=payload.input)
-    chat_response = await process_chat(
-        session, chat_request, background_tasks, meta=payload.metadata
-    )
+    chat_response = await process_chat(session, chat_request, meta=payload.metadata)
     return ResponseQueuedResponse(
         id=chat_response.reply_utterance_id,
         object="response",
