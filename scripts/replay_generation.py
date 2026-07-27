@@ -23,6 +23,7 @@ from app.models.response import Utterance
 from app.response.crud import (
     build_chat_history,
     get_daily_prompt,
+    get_instruction_template,
     get_or_create_system_prompt,
     get_weekly_summary,
 )
@@ -96,12 +97,14 @@ async def replay(utterance_id_prefix: str) -> None:
         prev_summary = await get_weekly_summary(
             session, user_id, week_start - datetime.timedelta(days=7)
         )
+        instruction_template = await get_instruction_template(session)
         new_system_prompt = compose_instruction_prompt(
             base=base_prompt,
             daily_content=daily_prompt.content if daily_prompt else None,
             weekly_summary=prev_summary,
             user_local_time=user_local_time,
             day_number=day_number,
+            template=instruction_template,
         )
 
     print(f"Bot utterance: {bot_utt.id}")
