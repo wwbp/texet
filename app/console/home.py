@@ -92,6 +92,16 @@ async def console_root(_: None = Depends(require_admin)) -> HTMLResponse:
               <h2>Daily Prompts</h2>
               <p>One prompt per day number. Appended to the system prompt when matched.</p>
             </a>
+            <a class="card" href="{CONSOLE_PREFIX}/prompt-templates">
+              <span>Assistant</span>
+              <h2>Prompt Template</h2>
+              <p>Layout with placeholders that consolidates every prompt piece into one.</p>
+            </a>
+            <a class="card" href="{CONSOLE_PREFIX}/summarization-prompts">
+              <span>Assistant</span>
+              <h2>Summarization Prompts</h2>
+              <p>Instruction for the weekly summarizer. Latest created prompt is active.</p>
+            </a>
             <a class="card" href="{CONSOLE_PREFIX}/exports">
               <span>Data</span>
               <h2>Exports</h2>

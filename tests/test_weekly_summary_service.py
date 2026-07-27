@@ -6,8 +6,10 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import UTTERANCE_STATUS_MODERATED
+from app.models.response import SummarizationPrompt
 from app.response import service as response_service
 from app.response.crud import (
+    DEFAULT_SUMMARIZATION_PROMPT,
     build_chat_history,
     create_utterance,
     get_or_create_bot_speaker,
@@ -104,6 +106,57 @@ async def test_generate_user_weekly_summary_stores_result(
 
     summary = await get_weekly_summary(async_session, "u-sum-gen", _WEEK_START)
     assert summary == "User greeted the bot and had a brief exchange."
+
+
+@pytest.mark.asyncio
+async def test_generate_user_weekly_summary_uses_db_summarization_prompt(
+    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, str] = {}
+
+    async def _fake_generate_reply(_history: list[object], _query: str, system_prompt: str) -> str:
+        captured["system_prompt"] = system_prompt
+        return "summary"
+
+    monkeypatch.setattr(response_service, "_generate_reply", _fake_generate_reply)
+
+    async with async_session.begin():
+        async_session.add(SummarizationPrompt(prompt="Summarize in exactly one sentence."))
+        speaker = await get_or_create_speaker(async_session, "u-sum-dbp", meta={"type": "user"})
+        conversation = await get_or_create_conversation(async_session, speaker.id)
+        utt = await create_utterance(
+            async_session, conversation.id, speaker.id, "hi", status="received"
+        )
+        utt.timestamp = _WEEK_MID_DT
+
+    await generate_user_weekly_summary(async_session, "u-sum-dbp", _WEEK_START)
+
+    assert captured["system_prompt"] == "Summarize in exactly one sentence."
+
+
+@pytest.mark.asyncio
+async def test_generate_user_weekly_summary_falls_back_to_default_prompt(
+    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, str] = {}
+
+    async def _fake_generate_reply(_history: list[object], _query: str, system_prompt: str) -> str:
+        captured["system_prompt"] = system_prompt
+        return "summary"
+
+    monkeypatch.setattr(response_service, "_generate_reply", _fake_generate_reply)
+
+    async with async_session.begin():
+        speaker = await get_or_create_speaker(async_session, "u-sum-defp", meta={"type": "user"})
+        conversation = await get_or_create_conversation(async_session, speaker.id)
+        utt = await create_utterance(
+            async_session, conversation.id, speaker.id, "hi", status="received"
+        )
+        utt.timestamp = _WEEK_MID_DT
+
+    await generate_user_weekly_summary(async_session, "u-sum-defp", _WEEK_START)
+
+    assert captured["system_prompt"] == DEFAULT_SUMMARIZATION_PROMPT
 
 
 @pytest.mark.asyncio

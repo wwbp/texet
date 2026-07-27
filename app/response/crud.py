@@ -20,14 +20,24 @@ from app.config import (
 from app.models.response import (
     Conversation,
     DailyPrompt,
+    InstructionTemplate,
     Speaker,
+    SummarizationPrompt,
     SystemPrompt,
     Utterance,
     WeeklySummary,
 )
+from app.response.prompt import DEFAULT_INSTRUCTION_TEMPLATE
 from app.response.utils import day_marker, extract_utc_offset
 
 DEFAULT_SYSTEM_PROMPT = "you are a helpful assistant."
+
+DEFAULT_SUMMARIZATION_PROMPT = (
+    "You are summarizing a week of conversation between a user and a chatbot. "
+    "Produce a concise 3-5 sentence summary of the key topics, decisions, and "
+    "context that would be useful for continuing the conversation next week. "
+    "Focus on what the user shared about themselves and what was discussed."
+)
 
 
 def bot_speaker_id(user_id: str) -> str:
@@ -144,9 +154,35 @@ async def get_or_create_system_prompt(session: AsyncSession) -> str:
     return value
 
 
-def _local_date(
-    timestamp: datetime.datetime, offset: datetime.timedelta | None
-) -> datetime.date:
+async def get_summarization_prompt(session: AsyncSession) -> str:
+    result = await session.execute(
+        select(SummarizationPrompt).order_by(SummarizationPrompt.created_at.desc()).limit(1)
+    )
+    prompt = result.scalar_one_or_none()
+    if not prompt:
+        return DEFAULT_SUMMARIZATION_PROMPT
+
+    value = prompt.prompt.strip()
+    if not value:
+        return DEFAULT_SUMMARIZATION_PROMPT
+    return value
+
+
+async def get_instruction_template(session: AsyncSession) -> str:
+    result = await session.execute(
+        select(InstructionTemplate).order_by(InstructionTemplate.created_at.desc()).limit(1)
+    )
+    row = result.scalar_one_or_none()
+    if not row:
+        return DEFAULT_INSTRUCTION_TEMPLATE
+
+    value = row.template.strip()
+    if not value:
+        return DEFAULT_INSTRUCTION_TEMPLATE
+    return value
+
+
+def _local_date(timestamp: datetime.datetime, offset: datetime.timedelta | None) -> datetime.date:
     tz = datetime.timezone(offset) if offset is not None else datetime.UTC
     return timestamp.astimezone(tz).date()
 
@@ -280,9 +316,7 @@ async def get_daily_prompt(
     session: AsyncSession,
     day_number: int,
 ) -> DailyPrompt | None:
-    result = await session.execute(
-        select(DailyPrompt).where(DailyPrompt.day_number == day_number)
-    )
+    result = await session.execute(select(DailyPrompt).where(DailyPrompt.day_number == day_number))
     return result.scalar_one_or_none()
 
 

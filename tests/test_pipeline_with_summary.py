@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker
 
 from app.config import UTTERANCE_STATUS_SENT
-from app.models.response import DailyPrompt, SystemPrompt, Utterance
+from app.models.response import DailyPrompt, InstructionTemplate, SystemPrompt, Utterance
 from app.response import service as response_service
 from app.response.crud import (
     create_queued_utterance,
@@ -78,6 +78,58 @@ async def test_pipeline_injects_summary_into_system_prompt(
     assert isinstance(system_prompt, str)
     assert "[Previous week summary]" in system_prompt
     assert "User discussed their goals." in system_prompt
+
+
+@pytest.mark.asyncio
+async def test_pipeline_uses_db_instruction_template(
+    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An operator-stored layout template replaces the built-in one."""
+    captured: dict[str, object] = {}
+
+    async def _fake_generate_reply(
+        chat_history: list[object], query: str, system_prompt: str, **_kwargs: object
+    ) -> str:
+        captured["system_prompt"] = system_prompt
+        return "ok"
+
+    async def _allow_moderation(*_args: object, **_kwargs: object) -> tuple[bool, str, str, float]:
+        return False, "", "", 0.0
+
+    async def _fake_send_sms(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(response_service, "_moderate_message", _allow_moderation)
+    monkeypatch.setattr(response_service, "_moderate_text", _allow_moderation)
+    monkeypatch.setattr(response_service, "_generate_reply", _fake_generate_reply)
+    monkeypatch.setattr(response_service, "_send_sms", _fake_send_sms)
+
+    now_utc = datetime.datetime.now(datetime.UTC)
+    prev_week_start = week_start_utc(now_utc) - datetime.timedelta(days=7)
+
+    async with async_session.begin():
+        async_session.add(InstructionTemplate(template="RULES: {base}\n\nRECAP: {weekly_summary}"))
+        speaker = await get_or_create_speaker(async_session, "u-pipe-tmpl", meta={"type": "user"})
+        bot = await get_or_create_bot_speaker(async_session, "u-pipe-tmpl")
+        conversation = await get_or_create_conversation(async_session, speaker.id)
+        await upsert_weekly_summary(
+            async_session, "u-pipe-tmpl", prev_week_start, "User discussed their goals."
+        )
+        user_utt = await create_utterance(async_session, conversation.id, speaker.id, "hello")
+        bot_utt = await create_queued_utterance(
+            async_session, conversation.id, bot.id, reply_to_id=user_utt.id
+        )
+        bot_utt_id = bot_utt.id
+
+    sessionmaker = _sessionmaker_from(async_session)
+    await response_service._run_deferred_reply("u-pipe-tmpl", user_utt.id, bot_utt_id, sessionmaker)
+
+    system_prompt = captured["system_prompt"]
+    assert isinstance(system_prompt, str)
+    assert system_prompt.startswith("RULES: ")
+    assert "RECAP: User discussed their goals." in system_prompt
+    # The built-in conventions block is not part of the operator's template.
+    assert "[Conversation history conventions]" not in system_prompt
 
 
 @pytest.mark.asyncio

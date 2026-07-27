@@ -11,18 +11,12 @@ from app.models.response import Utterance
 from app.response import service as response_service
 from app.response.crud import (
     bot_speaker_id,
+    get_summarization_prompt,
     upsert_weekly_summary,
 )
 from app.response.utils import week_start_utc
 
 logger = logging.getLogger(__name__)
-
-SUMMARIZATION_PROMPT = (
-    "You are summarizing a week of conversation between a user and a chatbot. "
-    "Produce a concise 3-5 sentence summary of the key topics, decisions, and "
-    "context that would be useful for continuing the conversation next week. "
-    "Focus on what the user shared about themselves and what was discussed."
-)
 
 
 def build_week_transcript(utterances: list[Utterance], user_id: str) -> str:
@@ -62,7 +56,8 @@ async def generate_user_weekly_summary(
     if not transcript.strip():
         return
 
-    summary = await response_service._generate_reply([], transcript, SUMMARIZATION_PROMPT)
+    instruction = await get_summarization_prompt(session)
+    summary = await response_service._generate_reply([], transcript, instruction)
     await upsert_weekly_summary(session, user_id, week_start, summary)
     await session.commit()
 

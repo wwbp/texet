@@ -46,6 +46,7 @@ from app.response.crud import (
     create_queued_utterance,
     create_utterance,
     get_daily_prompt,
+    get_instruction_template,
     get_latest_system_prompt,
     get_or_create_bot_speaker,
     get_or_create_conversation,
@@ -63,7 +64,6 @@ from app.response.schemas import (
 from app.response.utils import week_start_utc
 
 _logger = logging.getLogger(__name__)
-
 
 
 def _merge_meta(
@@ -458,6 +458,7 @@ async def _process_queued_reply(
         prev_summary = await get_weekly_summary(session, user_id, prev_week_start)
         sp = await get_latest_system_prompt(session)
         base_prompt = await get_or_create_system_prompt(session)
+        instruction_template = await get_instruction_template(session)
         daily_prompt = (
             await get_daily_prompt(session, day_number) if day_number is not None else None
         )
@@ -532,6 +533,7 @@ async def _process_queued_reply(
         weekly_summary=prev_summary,
         user_local_time=user_local_time,
         day_number=day_number,
+        template=instruction_template,
     )
 
     generation_snapshot = _build_generation_snapshot(
