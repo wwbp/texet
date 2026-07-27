@@ -7,7 +7,11 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker
 
 from app import worker
-from app.config import UTTERANCE_STATUS_FAILED, UTTERANCE_STATUS_SENT
+from app.config import (
+    UTTERANCE_STATUS_FAILED,
+    UTTERANCE_STATUS_PROCESSING,
+    UTTERANCE_STATUS_SENT,
+)
 from app.models.response import Utterance
 from app.response import service as response_service
 from app.response.crud import (
@@ -100,7 +104,31 @@ async def test_process_one_generates_and_sends_reply(
 
 
 @pytest.mark.asyncio
-async def test_process_one_marks_reply_failed_on_error(
+async def test_process_one_retries_a_reply_that_errors(
+    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With attempts left the claim is held, so reclaim_stale requeues it."""
+    calls: list[str] = []
+    _stub_externals(monkeypatch, calls)
+
+    async def _boom(*_args: object, **_kwargs: object) -> str:
+        raise RuntimeError("llm exploded")
+
+    monkeypatch.setattr(response_service, "_generate_reply", _boom)
+    (bot_utt,) = await _seed_queued_replies(async_session, "u-w-fail", ["hello"])
+
+    assert await worker.process_one(_sessionmaker_from(async_session)) is True
+
+    row = await async_session.get(Utterance, bot_utt.id, populate_existing=True)
+    assert row is not None
+    assert row.status == UTTERANCE_STATUS_PROCESSING
+    assert row.attempts == 1
+    assert row.error is not None
+    assert "llm exploded" in row.error
+
+
+@pytest.mark.asyncio
+async def test_process_one_fails_a_reply_out_of_attempts(
     async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls: list[str] = []
@@ -110,7 +138,8 @@ async def test_process_one_marks_reply_failed_on_error(
         raise RuntimeError("llm exploded")
 
     monkeypatch.setattr(response_service, "_generate_reply", _boom)
-    (bot_utt,) = await _seed_queued_replies(async_session, "u-w-fail", ["hello"])
+    monkeypatch.setenv("WORKER_MAX_ATTEMPTS", "1")
+    (bot_utt,) = await _seed_queued_replies(async_session, "u-w-fail-final", ["hello"])
 
     assert await worker.process_one(_sessionmaker_from(async_session)) is True
 

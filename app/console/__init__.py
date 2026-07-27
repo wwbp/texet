@@ -2,6 +2,7 @@ from app.console import (  # noqa: F401
     api_keys,
     daily_prompts,
     exports,
+    failures,
     home,
     prompt_templates,
     summarization_prompts,

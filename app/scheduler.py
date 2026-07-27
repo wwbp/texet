@@ -50,9 +50,15 @@ async def _weekly_summary_job() -> None:
 
 
 def start_scheduler() -> None:
+    # Hourly, not weekly. APScheduler holds no persistent jobstore, so a cron
+    # that fires once a week is simply skipped if no instance happens to be
+    # alive at that minute — a deploy at Sunday 00:00 UTC would cost every
+    # participant that week's summary, permanently and silently, because the
+    # next run summarises the following week. run_weekly_summaries skips
+    # participants already summarised, so repeat passes cost one query.
     _scheduler.add_job(
         _weekly_summary_job,
-        CronTrigger(day_of_week="sun", hour=0, minute=0, timezone="UTC"),
+        CronTrigger(minute=0, timezone="UTC"),
         max_instances=1,
         id="weekly_summaries",
         replace_existing=True,

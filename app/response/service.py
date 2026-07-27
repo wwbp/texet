@@ -36,10 +36,11 @@ from app.config import (
     get_sms_outbound_authorization,
     get_sms_outbound_url,
     get_sms_timeout_seconds,
+    get_worker_max_attempts,
     mock_external_apis,
 )
 from app.engines.factory import create_engine as _create_engine
-from app.models.response import Utterance
+from app.models.response import PromptIssue, Utterance
 from app.queue import count_pending_replies, notify_reply_queued
 from app.response.crud import (
     build_chat_history,
@@ -64,6 +65,34 @@ from app.response.schemas import (
 from app.response.utils import week_start_utc
 
 _logger = logging.getLogger(__name__)
+
+
+PROMPT_ISSUE_DAY_NUMBER_INVALID = "day_number_invalid"
+PROMPT_ISSUE_DAILY_PROMPT_MISSING = "daily_prompt_missing"
+
+
+def _coerce_day_number(raw: Any) -> tuple[int | None, str | None]:
+    """Return (day_number, problem) from raw request metadata.
+
+    Numeric strings are accepted: a hub that quotes the field would otherwise
+    silently cost a study every one of its daily prompts, since a dropped
+    section is invisible in the reply. The deviation is still reported so the
+    hub gets fixed. Booleans need their own branch because isinstance(True, int)
+    is True in Python, and True would reach the integer day_number column.
+    """
+    if raw is None:
+        return None, None
+    if isinstance(raw, bool):
+        return None, f"day_number must be an integer, got boolean {raw!r}."
+    if isinstance(raw, int):
+        return raw, None
+    if isinstance(raw, str):
+        candidate = raw.strip()
+        if candidate.lstrip("-").isdigit():
+            value = int(candidate)
+            return value, f"day_number arrived as the string {raw!r}; coerced to {value}."
+        return None, f"day_number is not numeric: {raw!r}."
+    return None, f"day_number has unsupported type {type(raw).__name__}: {raw!r}."
 
 
 def _merge_meta(
@@ -416,13 +445,47 @@ async def _mark_bot_utterance_failed(
     bot_utterance_id: str,
     exc: Exception,
 ) -> None:
+    """Record a generation error, retrying until the reply runs out of attempts.
+
+    A raised exception used to be terminal, so a transient provider error left
+    the participant with no reply and no retry — while a *killed* worker was
+    retried, because reclaim_stale rescues rows stuck in 'processing'. Leaving
+    the claim in place puts both failure modes on that same path: the claim
+    expires after WORKER_RECLAIM_SECONDS and the reply is requeued, which also
+    spaces retries out instead of hammering a provider that is already failing.
+
+    Caveat: the retry re-runs generation, so an error raised after the SMS was
+    handed off (the commit that follows it) can deliver a duplicate message. A
+    rare duplicate beats silence for a study participant.
+    """
     await session.rollback()
     failed_utterance = await session.get(Utterance, bot_utterance_id)
-    if failed_utterance:
-        message = str(exc).strip() or exc.__class__.__name__
+    if not failed_utterance:
+        return
+
+    message = (str(exc).strip() or exc.__class__.__name__)[:500]
+    failed_utterance.error = message
+    # Reaching here means an attempt just happened, so count at least one even
+    # if the caller never went through claim_next_reply (which is what
+    # increments the column).
+    attempts_made = max(failed_utterance.attempts, 1)
+    if attempts_made < get_worker_max_attempts():
+        _logger.warning(
+            "Reply %s failed on attempt %d; leaving the claim to expire for retry: %s",
+            bot_utterance_id,
+            attempts_made,
+            message,
+        )
+    else:
         failed_utterance.status = UTTERANCE_STATUS_FAILED
-        failed_utterance.error = message[:500]
-        await session.commit()
+        failed_utterance.claimed_at = None
+        _logger.error(
+            "Reply %s failed permanently after %d attempts: %s",
+            bot_utterance_id,
+            attempts_made,
+            message,
+        )
+    await session.commit()
 
 
 async def _process_queued_reply(
@@ -441,15 +504,24 @@ async def _process_queued_reply(
         current_week_start, datetime.time.min, tzinfo=datetime.UTC
     )
 
-    day_number: int | None = None
     user_local_time: str | None = None
     if user_utterance.meta:
-        raw = user_utterance.meta.get("day_number")
-        if isinstance(raw, int):
-            day_number = raw
         raw_time = user_utterance.meta.get("user_local_time")
         if isinstance(raw_time, str):
             user_local_time = raw_time
+
+    day_number, day_number_problem = _coerce_day_number(
+        (user_utterance.meta or {}).get("day_number")
+    )
+    issues: list[tuple[str, str]] = []
+    if day_number_problem:
+        _logger.error(
+            "Bad day_number from the hub for user=%s utterance=%s: %s",
+            user_id,
+            user_utterance.id,
+            day_number_problem,
+        )
+        issues.append((PROMPT_ISSUE_DAY_NUMBER_INVALID, day_number_problem))
 
     # Gather all prompt/history context in one short-lived session so no pool
     # connection is held during the moderation/LLM calls below — connection
@@ -462,6 +534,24 @@ async def _process_queued_reply(
         daily_prompt = (
             await get_daily_prompt(session, day_number) if day_number is not None else None
         )
+        if day_number is not None and daily_prompt is None:
+            detail = f"No daily prompt is configured for day {day_number}."
+            _logger.error(
+                "Missing daily prompt for user=%s utterance=%s: %s",
+                user_id,
+                user_utterance.id,
+                detail,
+            )
+            issues.append((PROMPT_ISSUE_DAILY_PROMPT_MISSING, detail))
+        for kind, detail in issues:
+            session.add(
+                PromptIssue(
+                    kind=kind,
+                    user_id=user_id,
+                    utterance_id=user_utterance.id,
+                    detail=detail,
+                )
+            )
         chat_history = await build_chat_history(
             session,
             conversation_id=user_utterance.conversation_id,
