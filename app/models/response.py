@@ -113,6 +113,24 @@ class SystemPrompt(Base):
     )
 
 
+class InstructionTemplate(Base):
+    """Layout template that consolidates the reply prompt; latest created row wins."""
+
+    __tablename__ = "instruction_templates"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
+    template: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class SummarizationPrompt(Base):
+    """Instruction prompt for the weekly summarizer; latest created row wins."""
+
+    __tablename__ = "summarization_prompts"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
+    prompt: Mapped[str] = mapped_column(Text, nullable=False)
+
+
 class DailyPrompt(Base):
     __tablename__ = "daily_prompts"
 
