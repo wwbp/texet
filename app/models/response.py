@@ -72,6 +72,12 @@ class Utterance(Base):
             "timestamp",
             postgresql_where=text("status in ('queued', 'processing')"),
         ),
+        # The console's failure feed scans newest-first across all users.
+        Index(
+            "ix_utterances_failed_timestamp",
+            "timestamp",
+            postgresql_where=text("status = 'failed'"),
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
@@ -111,6 +117,28 @@ class SystemPrompt(Base):
     model_id: Mapped[str] = mapped_column(
         String(255), nullable=False, default="gpt-4o-mini", server_default="gpt-4o-mini"
     )
+
+
+class PromptIssue(Base):
+    """Non-fatal prompt-assembly problems, surfaced on the console.
+
+    These do not fail a reply — the participant still gets an answer, just
+    without the section that went missing. Recorded so a hub sending a
+    malformed day_number, or a study day with no prompt authored, is visible
+    while the study is running rather than in post-hoc analysis.
+
+    Deliberately no foreign keys: this is a diagnostic log and must never block
+    a write to the tables it refers to.
+    """
+
+    __tablename__ = "prompt_issues"
+    __table_args__ = (Index("ix_prompt_issues_created_at", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
+    kind: Mapped[str] = mapped_column(String(64), nullable=False)
+    user_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    utterance_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    detail: Mapped[str] = mapped_column(Text, nullable=False)
 
 
 class InstructionTemplate(Base):

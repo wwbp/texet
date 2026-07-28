@@ -102,6 +102,11 @@ async def console_root(_: None = Depends(require_admin)) -> HTMLResponse:
               <h2>Summarization Prompts</h2>
               <p>Instruction for the weekly summarizer. Latest created prompt is active.</p>
             </a>
+            <a class="card" href="{CONSOLE_PREFIX}/failures">
+              <span>Operations</span>
+              <h2>Failures</h2>
+              <p>Replies that gave up, and prompts that silently went missing.</p>
+            </a>
             <a class="card" href="{CONSOLE_PREFIX}/exports">
               <span>Data</span>
               <h2>Exports</h2>

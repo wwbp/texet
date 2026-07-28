@@ -112,7 +112,11 @@ async def reclaim_stale(
         .values(
             status=UTTERANCE_STATUS_FAILED,
             claimed_at=None,
-            error=f"Reply abandoned after {max_attempts} stale claims.",
+            # Keep the cause a worker already recorded; the generic message is
+            # only right when the worker died without reporting anything.
+            error=func.coalesce(
+                Utterance.error, f"Reply abandoned after {max_attempts} stale claims."
+            ),
         )
     )
     requeued = cast(
@@ -135,8 +139,6 @@ async def count_pending_replies(session: AsyncSession) -> int:
     result = await session.execute(
         select(func.count())
         .select_from(Utterance)
-        .where(
-            Utterance.status.in_((UTTERANCE_STATUS_QUEUED, UTTERANCE_STATUS_PROCESSING))
-        )
+        .where(Utterance.status.in_((UTTERANCE_STATUS_QUEUED, UTTERANCE_STATUS_PROCESSING)))
     )
     return int(result.scalar_one())

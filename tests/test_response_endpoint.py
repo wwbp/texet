@@ -91,12 +91,14 @@ def sms_outbox(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, str | None]]:
         utterance_id: str,
         in_reply_to_utterance_id: str | None = None,
     ) -> None:
-        outbox.append({
-            "user_id": user_id,
-            "message": message,
-            "utterance_id": utterance_id,
-            "in_reply_to_utterance_id": in_reply_to_utterance_id,
-        })
+        outbox.append(
+            {
+                "user_id": user_id,
+                "message": message,
+                "utterance_id": utterance_id,
+                "in_reply_to_utterance_id": in_reply_to_utterance_id,
+            }
+        )
 
     monkeypatch.setattr(response_service, "_send_sms", _fake_send_sms)
     return outbox
@@ -293,8 +295,18 @@ async def test_response_success_persists(
     assert second_body["conversation_id"] == first_body["conversation_id"]
 
     assert sms_outbox == [
-        {"user_id": "u1", "message": "reply:hello", "utterance_id": first_body["id"], "in_reply_to_utterance_id": first_body["user_utterance_id"]},
-        {"user_id": "u1", "message": "reply:again", "utterance_id": second_body["id"], "in_reply_to_utterance_id": second_body["user_utterance_id"]},
+        {
+            "user_id": "u1",
+            "message": "reply:hello",
+            "utterance_id": first_body["id"],
+            "in_reply_to_utterance_id": first_body["user_utterance_id"],
+        },
+        {
+            "user_id": "u1",
+            "message": "reply:again",
+            "utterance_id": second_body["id"],
+            "in_reply_to_utterance_id": second_body["user_utterance_id"],
+        },
     ]
     assert kani_stub[-1]["system_prompt"] == compose_instruction_prompt(DEFAULT_SYSTEM_PROMPT)
     assert kani_stub[0]["history"] == []
@@ -653,6 +665,10 @@ async def test_response_marks_failed_on_generation_error(
     async_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Retry-until-exhausted is covered in tests/test_reply_retry.py; this test is
+    # about the terminal state, so make the first error the last attempt.
+    monkeypatch.setenv("WORKER_MAX_ATTEMPTS", "1")
+
     async def _fail_generate_reply(
         chat_history: list[object], query: str, system_prompt: str, **_kwargs: object
     ) -> str:
@@ -684,6 +700,10 @@ async def test_response_marks_failed_on_sms_error(
     async_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Retry-until-exhausted is covered in tests/test_reply_retry.py; this test is
+    # about the terminal state, so make the first error the last attempt.
+    monkeypatch.setenv("WORKER_MAX_ATTEMPTS", "1")
+
     async def _fail_send_sms(
         user_id: str,
         message: str,

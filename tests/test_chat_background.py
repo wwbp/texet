@@ -215,6 +215,10 @@ async def test_run_deferred_reply_moderated_persists_and_sends(
 async def test_run_deferred_reply_failure_marks_failed(
     async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # Retry-until-exhausted is covered in tests/test_reply_retry.py; this test is
+    # about the terminal state, so make the first error the last attempt.
+    monkeypatch.setenv("WORKER_MAX_ATTEMPTS", "1")
+
     async def _allow_moderation(_utterance: Utterance) -> tuple[bool, str, str, float]:
         return False, "", "", 0.0
 
@@ -541,6 +545,9 @@ async def test_run_deferred_reply_sms_failure_does_not_commit_text(
     async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """SMS failure must leave the bot utterance with text=None, not partially committed."""
+    # Retry-until-exhausted is covered in tests/test_reply_retry.py; this test is
+    # about the terminal state, so make the first error the last attempt.
+    monkeypatch.setenv("WORKER_MAX_ATTEMPTS", "1")
 
     async def _allow_moderation(_utterance: Utterance) -> tuple[bool, str, str, float]:
         return False, "", "", 0.0

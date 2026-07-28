@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import UTTERANCE_STATUS_MODERATED, UTTERANCE_STATUS_RECEIVED
-from app.models.response import Utterance
+from app.models.response import Utterance, WeeklySummary
 from app.response import service as response_service
 from app.response.crud import (
     bot_speaker_id,
@@ -85,7 +85,27 @@ async def run_weekly_summaries(sessionmaker: async_sessionmaker[AsyncSession]) -
         )
         user_ids = list(result.scalars().all())
 
-    for user_id in user_ids:
+        # Skip participants already summarised for this week. The job runs
+        # often so that a Sunday missed entirely — no instance alive when the
+        # cron fired — is repaired on the next pass instead of costing everyone
+        # a week of memory. That is only affordable if repeat passes do no work.
+        done = await session.execute(
+            select(WeeklySummary.user_id).where(WeeklySummary.week_start == prev_week_start)
+        )
+        already_summarized = set(done.scalars().all())
+
+    pending = [user_id for user_id in user_ids if user_id not in already_summarized]
+    if not pending:
+        return
+
+    logger.info(
+        "Generating weekly summaries for week=%s: %d pending, %d already done.",
+        prev_week_start,
+        len(pending),
+        len(already_summarized),
+    )
+
+    for user_id in pending:
         try:
             async with sessionmaker() as session:
                 await generate_user_weekly_summary(session, user_id, prev_week_start)
