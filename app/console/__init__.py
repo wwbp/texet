@@ -5,6 +5,7 @@ from app.console import (  # noqa: F401
     failures,
     home,
     prompt_templates,
+    summaries,
     summarization_prompts,
     system_prompts,
 )

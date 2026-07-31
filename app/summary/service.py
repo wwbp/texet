@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 import logging
+from dataclasses import dataclass
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -19,6 +20,13 @@ from app.response.utils import week_start_utc
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class ForceSummaryResult:
+    users: int
+    generated: int
+    failed: int
+
+
 def build_week_transcript(utterances: list[Utterance], user_id: str) -> str:
     bot_id = bot_speaker_id(user_id)
     lines: list[str] = []
@@ -32,14 +40,36 @@ def build_week_transcript(utterances: list[Utterance], user_id: str) -> str:
     return "\n".join(lines)
 
 
+def _week_bounds(week_start: datetime.date) -> tuple[datetime.datetime, datetime.datetime]:
+    week_end = week_start + datetime.timedelta(days=7)
+    return (
+        datetime.datetime.combine(week_start, datetime.time.min, tzinfo=datetime.UTC),
+        datetime.datetime.combine(week_end, datetime.time.min, tzinfo=datetime.UTC),
+    )
+
+
+async def active_user_ids(session: AsyncSession, week_start: datetime.date) -> list[str]:
+    """Participants who sent at least one message during the week."""
+    week_start_dt, week_end_dt = _week_bounds(week_start)
+    result = await session.execute(
+        select(Utterance.speaker_id)
+        .where(
+            Utterance.status == UTTERANCE_STATUS_RECEIVED,
+            Utterance.timestamp >= week_start_dt,
+            Utterance.timestamp < week_end_dt,
+        )
+        .distinct()
+    )
+    return list(result.scalars().all())
+
+
 async def generate_user_weekly_summary(
     session: AsyncSession,
     user_id: str,
     week_start: datetime.date,
-) -> None:
-    week_end = week_start + datetime.timedelta(days=7)
-    week_start_dt = datetime.datetime.combine(week_start, datetime.time.min, tzinfo=datetime.UTC)
-    week_end_dt = datetime.datetime.combine(week_end, datetime.time.min, tzinfo=datetime.UTC)
+) -> bool:
+    """Summarise one participant's week. Returns False when there is nothing to summarise."""
+    week_start_dt, week_end_dt = _week_bounds(week_start)
 
     result = await session.execute(
         select(Utterance)
@@ -54,36 +84,22 @@ async def generate_user_weekly_summary(
 
     transcript = build_week_transcript(list(utterances), user_id)
     if not transcript.strip():
-        return
+        return False
 
     instruction = await get_summarization_prompt(session)
     summary = await response_service._generate_reply([], transcript, instruction)
     await upsert_weekly_summary(session, user_id, week_start, summary)
     await session.commit()
+    return True
 
 
 async def run_weekly_summaries(sessionmaker: async_sessionmaker[AsyncSession]) -> None:
     now_utc = datetime.datetime.now(datetime.UTC)
     current_week_start = week_start_utc(now_utc)
     prev_week_start = current_week_start - datetime.timedelta(days=7)
-    week_start_dt = datetime.datetime.combine(
-        prev_week_start, datetime.time.min, tzinfo=datetime.UTC
-    )
-    week_end_dt = datetime.datetime.combine(
-        current_week_start, datetime.time.min, tzinfo=datetime.UTC
-    )
 
     async with sessionmaker() as session:
-        result = await session.execute(
-            select(Utterance.speaker_id)
-            .where(
-                Utterance.status == UTTERANCE_STATUS_RECEIVED,
-                Utterance.timestamp >= week_start_dt,
-                Utterance.timestamp < week_end_dt,
-            )
-            .distinct()
-        )
-        user_ids = list(result.scalars().all())
+        user_ids = await active_user_ids(session, prev_week_start)
 
         # Skip participants already summarised for this week. The job runs
         # often so that a Sunday missed entirely — no instance alive when the
@@ -111,3 +127,32 @@ async def run_weekly_summaries(sessionmaker: async_sessionmaker[AsyncSession]) -
                 await generate_user_weekly_summary(session, user_id, prev_week_start)
         except Exception:
             logger.exception("Failed to generate weekly summary for user=%s", user_id)
+
+
+async def force_weekly_summaries(
+    sessionmaker: async_sessionmaker[AsyncSession],
+    week_start: datetime.date,
+) -> ForceSummaryResult:
+    """Regenerate summaries for every participant active in the given week.
+
+    Unlike the scheduled job this ignores existing summaries, which is the only
+    way to exercise the summarizer against data already in the database — the
+    cron would see the week as done and do nothing.
+    """
+    async with sessionmaker() as session:
+        user_ids = await active_user_ids(session, week_start)
+
+    logger.info("Forcing weekly summaries for week=%s: %d participants.", week_start, len(user_ids))
+
+    generated = 0
+    failed = 0
+    for user_id in user_ids:
+        try:
+            async with sessionmaker() as session:
+                if await generate_user_weekly_summary(session, user_id, week_start):
+                    generated += 1
+        except Exception:
+            failed += 1
+            logger.exception("Failed to force weekly summary for user=%s", user_id)
+
+    return ForceSummaryResult(users=len(user_ids), generated=generated, failed=failed)
