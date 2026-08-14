@@ -49,7 +49,14 @@ async def console_client(console_env: None) -> AsyncClient:
 
 @pytest.fixture()
 def stub_llm(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def _fake_generate_reply(_history: list[object], _query: str, _prompt: str) -> str:
+    async def _fake_generate_reply(
+        _history: list[object],
+        _query: str,
+        _prompt: str,
+        *,
+        provider: str = "",
+        model_id: str = "",
+    ) -> str:
         return "console-forced summary"
 
     monkeypatch.setattr(response_service, "_generate_reply", _fake_generate_reply)

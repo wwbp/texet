@@ -19,6 +19,17 @@ from app.response.utils import week_start_utc
 
 logger = logging.getLogger(__name__)
 
+# The summarizer does not run on the model configured for replies: replies use
+# the provider/model on the latest system_prompts row, this runs on OpenAI.
+# That was never a decision, it was _generate_reply's default arguments showing
+# through — which meant changing the reply model in the console silently left
+# summaries where they were, and any edit to those defaults would have moved
+# every participant's summaries to a different model mid-study without a line
+# of code changing here. Named explicitly so the split is visible and stays put
+# until someone chooses otherwise. Behaviour is unchanged.
+SUMMARY_PROVIDER = "openai"
+SUMMARY_MODEL_ID = "gpt-4o-mini"
+
 
 @dataclass(frozen=True)
 class ForceSummaryResult:
@@ -87,7 +98,13 @@ async def generate_user_weekly_summary(
         return False
 
     instruction = await get_summarization_prompt(session)
-    summary = await response_service._generate_reply([], transcript, instruction)
+    summary = await response_service._generate_reply(
+        [],
+        transcript,
+        instruction,
+        provider=SUMMARY_PROVIDER,
+        model_id=SUMMARY_MODEL_ID,
+    )
     await upsert_weekly_summary(session, user_id, week_start, summary)
     await session.commit()
     return True
