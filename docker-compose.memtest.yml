@@ -1,0 +1,16 @@
+# Overlay for the SMART-R memory test: prod's model and prompts, but no
+# scheduler, no alert emails, and outbound SMS to the local sink.
+services:
+  api:
+    env_file:
+      - .env.api
+      - .env.memtest
+  worker:
+    env_file:
+      - .env.api
+      - .env.memtest
+  db:
+    # A host postgres already owns 127.0.0.1:5432, so the driver needs a port
+    # of its own to be sure it is talking to the test database.
+    ports:
+      - "55432:5432"
