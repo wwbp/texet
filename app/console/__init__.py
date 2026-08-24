@@ -1,6 +1,7 @@
 from app.console import (  # noqa: F401
     api_keys,
     daily_prompts,
+    engagement,
     exports,
     failures,
     home,

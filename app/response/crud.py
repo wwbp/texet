@@ -28,7 +28,7 @@ from app.models.response import (
     WeeklySummary,
 )
 from app.response.prompt import DEFAULT_INSTRUCTION_TEMPLATE
-from app.response.utils import day_marker, extract_utc_offset
+from app.response.utils import day_marker, extract_utc_offset, strip_bracketed_segments
 
 DEFAULT_SYSTEM_PROMPT = "you are a helpful assistant."
 
@@ -233,17 +233,23 @@ async def build_chat_history(
     previous_date: datetime.date | None = None
     chat_history: list[ChatMessage] = []
     for utterance in included:
-        text = utterance.text
+        is_bot = utterance.speaker_id == bot_id
+        # A reply that echoed a day marker or leaked prompt scaffolding would
+        # otherwise come back to the model as its own prior turn, teaching it
+        # the habit that produced the artifact. Participant text is left alone:
+        # a bracket someone typed is content.
+        text = strip_bracketed_segments(utterance.text) if is_bot else utterance.text
+        # Nothing left of the reply means it was not a turn. An empty assistant
+        # message, or one holding only a bare day marker, is worse than a gap.
+        if not text:
+            continue
         if annotate_days:
             offset = extract_utc_offset(utterance.meta) or offset
             local_date = _local_date(utterance.timestamp, offset)
             if local_date != previous_date:
                 text = f"{day_marker(local_date)}\n{text}"
                 previous_date = local_date
-        if utterance.speaker_id == bot_id:
-            chat_history.append(ChatMessage.assistant(text))
-        else:
-            chat_history.append(ChatMessage.user(text))
+        chat_history.append(ChatMessage.assistant(text) if is_bot else ChatMessage.user(text))
     return chat_history
 
 
@@ -318,6 +324,34 @@ async def get_daily_prompt(
 ) -> DailyPrompt | None:
     result = await session.execute(select(DailyPrompt).where(DailyPrompt.day_number == day_number))
     return result.scalar_one_or_none()
+
+
+async def get_participant_utc_offset(
+    session: AsyncSession,
+    user_id: str,
+    at_or_before: datetime.datetime | None = None,
+) -> datetime.timedelta | None:
+    """The participant's UTC offset, from the most recent message that recorded one.
+
+    The hub sends user_local_time on the participant's own utterances, so only
+    those are consulted. 'Most recent' rather than 'first' so a participant who
+    moves, or crosses a DST boundary, is summarised on the clock they were
+    actually on; at_or_before keeps a historical week from being judged by an
+    offset adopted after it ended. None when the hub never sent one, which
+    leaves every caller on UTC.
+    """
+    conditions = [
+        Utterance.speaker_id == user_id,
+        Utterance.meta["user_local_time"].astext.isnot(None),
+    ]
+    if at_or_before is not None:
+        conditions.append(Utterance.timestamp < at_or_before)
+
+    result = await session.execute(
+        select(Utterance.meta).where(*conditions).order_by(Utterance.timestamp.desc()).limit(1)
+    )
+    meta = result.scalars().first()
+    return extract_utc_offset(meta)
 
 
 async def get_weekly_summary(

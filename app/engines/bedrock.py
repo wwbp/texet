@@ -9,8 +9,15 @@ from kani.models import ChatMessage, ChatRole  # type: ignore[import-untyped]
 
 
 class BedrockCompletion(BaseCompletion):
-    def __init__(self, message: ChatMessage) -> None:
+    def __init__(
+        self,
+        message: ChatMessage,
+        prompt_tokens: int | None = None,
+        completion_tokens: int | None = None,
+    ) -> None:
         self._message = message
+        self._prompt_tokens = prompt_tokens
+        self._completion_tokens = completion_tokens
 
     @property
     def message(self) -> ChatMessage:
@@ -18,11 +25,11 @@ class BedrockCompletion(BaseCompletion):
 
     @property
     def prompt_tokens(self) -> int | None:
-        return None
+        return self._prompt_tokens
 
     @property
     def completion_tokens(self) -> int | None:
-        return None
+        return self._completion_tokens
 
 
 _FIRST_TURN_PLACEHOLDER = "[start of conversation]"
@@ -45,9 +52,7 @@ def normalize_converse_messages(conversation: list[dict]) -> list[dict]:
         else:
             normalized.append(entry)
     if normalized and normalized[0]["role"] == "assistant":
-        normalized.insert(
-            0, {"role": "user", "content": [{"text": _FIRST_TURN_PLACEHOLDER}]}
-        )
+        normalized.insert(0, {"role": "user", "content": [{"text": _FIRST_TURN_PLACEHOLDER}]})
     return normalized
 
 
@@ -62,6 +67,16 @@ _CONTEXT_SIZES: dict[str, int] = {
     # Meta Llama
     "meta.llama3-3-70b-instruct-v1:0": 128_000,
     "us.meta.llama3-3-70b-instruct-v1:0": 128_000,
+    # Llama 4 advertises far more than this. 128k is a deliberate floor, not the
+    # published ceiling: this number only governs when kani starts dropping
+    # history, and the largest prompt the app builds is a week's transcript —
+    # about 6k tokens at the widest observed in prod. A floor we can stand
+    # behind beats a ceiling we would be quoting from memory. Raise it if a
+    # workload ever genuinely needs more.
+    "meta.llama4-maverick-17b-instruct-v1:0": 128_000,
+    "us.meta.llama4-maverick-17b-instruct-v1:0": 128_000,
+    "meta.llama4-scout-17b-instruct-v1:0": 128_000,
+    "us.meta.llama4-scout-17b-instruct-v1:0": 128_000,
 }
 
 
@@ -87,6 +102,12 @@ class BedrockEngine(BaseEngine):
             client_kwargs["aws_access_key_id"] = aws_access_key_id
             client_kwargs["aws_secret_access_key"] = aws_secret_access_key
         self.client = boto3.client("bedrock-runtime", **client_kwargs)
+        # kani's chat_round returns only the reply message, so the completion —
+        # and the token usage on it — never reaches the caller. The engine does,
+        # and one is built per generation, so the last call's usage is the
+        # generation's usage. None means Converse reported none, which is not
+        # the same fact as zero.
+        self.last_usage: dict[str, int] | None = None
 
     def message_len(self, message: ChatMessage) -> int:
         content = message.content if isinstance(message.content, str) else str(message.content)
@@ -123,7 +144,21 @@ class BedrockEngine(BaseEngine):
         loop = asyncio.get_running_loop()
         response = await loop.run_in_executor(None, self._call_bedrock, system_blocks, conversation)
         text = response["output"]["message"]["content"][0]["text"].strip()
-        return BedrockCompletion(ChatMessage(role=ChatRole.ASSISTANT, content=text))
+
+        usage = response.get("usage") or {}
+        prompt_tokens = usage.get("inputTokens")
+        completion_tokens = usage.get("outputTokens")
+        # Cleared, not left stale, when a call reports nothing.
+        self.last_usage = (
+            {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens}
+            if prompt_tokens is not None and completion_tokens is not None
+            else None
+        )
+        return BedrockCompletion(
+            ChatMessage(role=ChatRole.ASSISTANT, content=text),
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+        )
 
     def _call_bedrock(self, system_blocks: list[dict], messages: list[dict]) -> dict:
         converse_kwargs: dict[str, object] = {

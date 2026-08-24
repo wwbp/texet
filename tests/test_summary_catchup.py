@@ -27,7 +27,11 @@ from app.response.crud import (
     upsert_weekly_summary,
 )
 from app.response.utils import week_start_utc
-from app.summary.service import run_weekly_summaries
+from app.summary.service import (
+    SUMMARY_MODEL_ID,
+    SUMMARY_PROVIDER,
+    run_weekly_summaries,
+)
 
 
 def _sessionmaker_from(session: AsyncSession) -> async_sessionmaker[AsyncSession]:
@@ -67,7 +71,15 @@ async def _seed_last_week_activity(session: AsyncSession, user_id: str) -> None:
 def counting_llm(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     generated: list[str] = []
 
-    async def _fake_generate_reply(_history: list[object], query: str, _prompt: str) -> str:
+    async def _fake_generate_reply(
+        _history: list[object],
+        query: str,
+        _prompt: str,
+        *,
+        provider: str,
+        model_id: str,
+    ) -> str:
+        assert (provider, model_id) == (SUMMARY_PROVIDER, SUMMARY_MODEL_ID)
         generated.append(query)
         return f"summary #{len(generated)}"
 
@@ -142,7 +154,7 @@ async def test_one_failing_participant_does_not_block_the_rest(
     await _seed_last_week_activity(async_session, "u-catchup-boom")
     await _seed_last_week_activity(async_session, "u-catchup-fine")
 
-    async def _selective(_history: list[object], query: str, _prompt: str) -> str:
+    async def _selective(_history: list[object], query: str, _prompt: str, **_model: str) -> str:
         if "u-catchup-boom" in query:
             raise RuntimeError("context window exceeded")
         return "ok summary"
@@ -167,7 +179,7 @@ async def test_a_failed_participant_is_retried_next_pass(
 
     attempts = {"n": 0}
 
-    async def _fail_once(_history: list[object], _query: str, _prompt: str) -> str:
+    async def _fail_once(_history: list[object], _query: str, _prompt: str, **_model: str) -> str:
         attempts["n"] += 1
         if attempts["n"] == 1:
             raise RuntimeError("transient")

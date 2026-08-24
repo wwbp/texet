@@ -24,6 +24,7 @@ from app.response.crud import (
     get_or_create_speaker,
     get_or_create_system_prompt,
 )
+from app.response.utils import day_marker
 
 
 @pytest.mark.asyncio
@@ -629,3 +630,116 @@ async def test_build_chat_history_day_marker_offset_backfills_leading_messages(
         ("assistant", "daily check-in"),
         ("user", "doing fine"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_build_chat_history_prunes_bracketed_artifacts_from_bot_replies(
+    async_session: AsyncSession,
+) -> None:
+    """A reply that echoed a day marker must not teach the model to do it again.
+
+    The stored text keeps the raw generation, so the history read is where the
+    artifact has to be dropped — before the fresh marker for this turn goes on.
+    """
+    speaker = await get_or_create_speaker(async_session, "user-prune", meta={"type": "user"})
+    bot = await get_or_create_bot_speaker(async_session, "user-prune")
+    conversation = await create_conversation(async_session, speaker.id)
+    await async_session.commit()
+
+    user_msg = await create_utterance(
+        async_session,
+        conversation.id,
+        speaker.id,
+        "slept ok",
+        meta={"user_local_time": "2026-01-05T09:00:00-05:00"},
+    )
+    await create_utterance(
+        async_session,
+        conversation.id,
+        bot.id,
+        "Glad you rested.\n\n[Friday, August 21]\nGood morning!",
+        status=UTTERANCE_STATUS_SENT,
+    )
+    later = await create_utterance(
+        async_session,
+        conversation.id,
+        speaker.id,
+        "still tired",
+        meta={"user_local_time": "2026-01-05T10:00:00-05:00"},
+    )
+    await async_session.commit()
+
+    history = await build_chat_history(
+        async_session,
+        conversation_id=conversation.id,
+        user_id="user-prune",
+        up_to_timestamp=later.timestamp,
+        annotate_days=True,
+    )
+
+    assert [(msg.role.value, msg.content) for msg in history] == [
+        ("user", f"{day_marker(user_msg.timestamp.date())}\nslept ok"),
+        ("assistant", "Glad you rested.\n\nGood morning!"),
+        ("user", "still tired"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_build_chat_history_drops_a_bot_reply_that_prunes_to_nothing(
+    async_session: AsyncSession,
+) -> None:
+    """An assistant turn with no content left is not a turn; it would otherwise
+    reach the model as an empty message, or as a bare day marker."""
+    speaker = await get_or_create_speaker(async_session, "user-empty", meta={"type": "user"})
+    bot = await get_or_create_bot_speaker(async_session, "user-empty")
+    conversation = await create_conversation(async_session, speaker.id)
+    await async_session.commit()
+
+    await create_utterance(async_session, conversation.id, speaker.id, "hi")
+    await create_utterance(
+        async_session,
+        conversation.id,
+        bot.id,
+        "[Friday, August 21]",
+        status=UTTERANCE_STATUS_SENT,
+    )
+    last = await create_utterance(async_session, conversation.id, speaker.id, "anyone there")
+    await async_session.commit()
+
+    history = await build_chat_history(
+        async_session,
+        conversation_id=conversation.id,
+        user_id="user-empty",
+        up_to_timestamp=last.timestamp,
+        annotate_days=False,
+    )
+
+    assert [(msg.role.value, msg.content) for msg in history] == [
+        ("user", "hi"),
+        ("user", "anyone there"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_build_chat_history_leaves_participant_brackets_alone(
+    async_session: AsyncSession,
+) -> None:
+    """Participants sent no brackets in prod, but if one does it is content."""
+    speaker = await get_or_create_speaker(async_session, "user-keep", meta={"type": "user"})
+    await get_or_create_bot_speaker(async_session, "user-keep")
+    conversation = await create_conversation(async_session, speaker.id)
+    await async_session.commit()
+
+    typed = "I felt [good] today"
+    last = await create_utterance(async_session, conversation.id, speaker.id, typed)
+    await async_session.commit()
+
+    history = await build_chat_history(
+        async_session,
+        conversation_id=conversation.id,
+        user_id="user-keep",
+        up_to_timestamp=last.timestamp,
+        annotate_days=False,
+    )
+
+    assert [(msg.role.value, msg.content) for msg in history] == [("user", typed)]

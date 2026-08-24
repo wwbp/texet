@@ -19,7 +19,13 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.config import DEFAULT_TIMEZONE, UTTERANCE_STATUS_RECEIVED, UTTERANCE_STATUSES_SQL
+from app.config import (
+    BEDROCK_DEFAULT_MODEL,
+    DEFAULT_LLM_PROVIDER,
+    DEFAULT_TIMEZONE,
+    UTTERANCE_STATUS_RECEIVED,
+    UTTERANCE_STATUSES_SQL,
+)
 from app.models.base import Base
 
 
@@ -112,10 +118,16 @@ class SystemPrompt(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
     provider: Mapped[str] = mapped_column(
-        String(32), nullable=False, default="openai", server_default="openai"
+        String(32),
+        nullable=False,
+        default=DEFAULT_LLM_PROVIDER,
+        server_default=DEFAULT_LLM_PROVIDER,
     )
     model_id: Mapped[str] = mapped_column(
-        String(255), nullable=False, default="gpt-4o-mini", server_default="gpt-4o-mini"
+        String(255),
+        nullable=False,
+        default=BEDROCK_DEFAULT_MODEL,
+        server_default=BEDROCK_DEFAULT_MODEL,
     )
 
 

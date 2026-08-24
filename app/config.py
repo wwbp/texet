@@ -105,7 +105,12 @@ def get_aws_region() -> str:
     return os.getenv("AWS_REGION", "us-east-1")
 
 
-BEDROCK_DEFAULT_MODEL: Final[str] = "us.anthropic.claude-sonnet-4-6"
+# Every path that generates text — replies and weekly summaries — runs on
+# Bedrock Llama. The openai provider stays selectable in the console, but it
+# is no longer any code path's default: an OpenAI default is only ever
+# reached by falling back, which is exactly when nobody is watching.
+DEFAULT_LLM_PROVIDER: Final[str] = "bedrock"
+BEDROCK_DEFAULT_MODEL: Final[str] = "us.meta.llama4-maverick-17b-instruct-v1:0"
 
 
 # OPENAI_MODEL: OpenAI model name.
@@ -249,16 +254,29 @@ DEFAULT_TIMEZONE: Final[datetime.tzinfo] = datetime.timezone(
 
 CONSOLE_PREFIX: Final[str] = "/console"
 
+# Score above which a message is withheld, per moderation category.
+#
+# The study moderates for two families only: self-harm and sexual content. The
+# rest are pinned to 1.0, which is an off switch rather than a high bar — the
+# comparison is a strict '>' and moderation scores are bounded at 1.0, so no
+# score clears it. That is the same value already applied to any category the
+# API reports that is not listed here.
+#
+# They are kept as explicit entries instead of being deleted so the full set the
+# API returns stays visible, and so re-enabling one is a threshold edit rather
+# than a rediscovery of the category's name.
 MODERATION_VALUES_FOR_BLOCKED = {
-    "harassment": 0.5,
-    "harassment/threatening": 0.1,
-    "hate": 0.5,
-    "hate/threatening": 0.1,
+    # Enforced.
     "self-harm": 0.2,
     "self-harm/instructions": 0.5,
     "self-harm/intent": 0.7,
     "sexual": 0.5,
     "sexual/minors": 0.2,
-    "violence": 0.7,
-    "violence/graphic": 0.8,
+    # Not enforced.
+    "harassment": 1.0,
+    "harassment/threatening": 1.0,
+    "hate": 1.0,
+    "hate/threatening": 1.0,
+    "violence": 1.0,
+    "violence/graphic": 1.0,
 }
