@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
 
-from app.config import BEDROCK_DEFAULT_MODEL, CONSOLE_PREFIX
+from app.config import BEDROCK_DEFAULT_MODEL, CONSOLE_PREFIX, DEFAULT_LLM_PROVIDER
 from app.console.core import _escape, _serialize_datetime, console_router, require_admin
 from app.db import get_async_session
 from app.models.response import SystemPrompt
@@ -158,8 +158,8 @@ def _render_system_prompts_page(
           <h2>Add prompt</h2>
           <form class="create-form" method="post" action="{CONSOLE_PREFIX}/system-prompts">
             <textarea name="prompt" rows="4" required placeholder="System prompt"></textarea>
-            {_provider_select("openai")}
-            <input name="model_id" required value="gpt-4o-mini" placeholder="Model ID"
+            {_provider_select(DEFAULT_LLM_PROVIDER)}
+            <input name="model_id" required value="{BEDROCK_DEFAULT_MODEL}" placeholder="Model ID"
                    style="{_INPUT_STYLE}margin-top:6px;" />
             <div class="actions">
               <button type="submit">Add prompt</button>
@@ -214,8 +214,10 @@ async def console_system_prompts_create(
 ) -> HTMLResponse:
     form = await request.form()
     value = str(form.get("prompt") or "").strip()
-    provider = str(form.get("provider") or "openai").strip()
-    model_id = str(form.get("model_id") or _MODEL_DEFAULTS.get(provider, "gpt-4o-mini")).strip()
+    provider = str(form.get("provider") or DEFAULT_LLM_PROVIDER).strip()
+    model_id = str(
+        form.get("model_id") or _MODEL_DEFAULTS.get(provider, BEDROCK_DEFAULT_MODEL)
+    ).strip()
     if not value:
         return _render_system_prompts_page(await _list_prompts(session), "Prompt is required.")
     if provider not in _MODEL_DEFAULTS:
@@ -237,8 +239,10 @@ async def console_system_prompts_update(
 ) -> HTMLResponse:
     form = await request.form()
     value = str(form.get("prompt") or "").strip()
-    provider = str(form.get("provider") or "openai").strip()
-    model_id = str(form.get("model_id") or _MODEL_DEFAULTS.get(provider, "gpt-4o-mini")).strip()
+    provider = str(form.get("provider") or DEFAULT_LLM_PROVIDER).strip()
+    model_id = str(
+        form.get("model_id") or _MODEL_DEFAULTS.get(provider, BEDROCK_DEFAULT_MODEL)
+    ).strip()
     if not value:
         return _render_system_prompts_page(await _list_prompts(session), "Prompt is required.")
     if provider not in _MODEL_DEFAULTS:

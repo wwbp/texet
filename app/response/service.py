@@ -11,6 +11,8 @@ from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import (
+    BEDROCK_DEFAULT_MODEL,
+    DEFAULT_LLM_PROVIDER,
     MODERATION_VALUES_FOR_BLOCKED,
     UTTERANCE_STATUS_FAILED,
     UTTERANCE_STATUS_MODERATED,
@@ -62,7 +64,12 @@ from app.response.schemas import (
     ResponseQueuedResponse,
     ResponseRequest,
 )
-from app.response.utils import week_start_utc
+from app.response.utils import (
+    extract_utc_offset,
+    strip_bracketed_segments,
+    week_bounds_utc,
+    week_start_for,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -119,9 +126,12 @@ async def _generate_reply(
     query: str,
     system_prompt: str,
     *,
-    provider: str = "openai",
-    model_id: str = "gpt-4o-mini",
+    provider: str = DEFAULT_LLM_PROVIDER,
+    model_id: str = BEDROCK_DEFAULT_MODEL,
+    usage_out: dict[str, int] | None = None,
 ) -> str:
+    """Generate one reply. When usage_out is given it is filled with the
+    provider's token counts, left untouched if the provider reported none."""
     if mock_external_apis():
         await asyncio.sleep(get_mock_llm_latency_ms() / 1000)
         return f"[mock {provider}/{model_id}] Echo: {query[:120]}"
@@ -134,6 +144,10 @@ async def _generate_reply(
     except Exception as exc:
         raise RuntimeError(f"Kani generation failed: {exc}") from exc
     finally:
+        if usage_out is not None:
+            last_usage = getattr(engine, "last_usage", None)
+            if last_usage:
+                usage_out.update(last_usage)
         await engine.close()
 
     if not reply.text:
@@ -498,17 +512,21 @@ async def _process_queued_reply(
         raise RuntimeError("User utterance text missing.")
 
     now_utc = datetime.datetime.now(datetime.UTC)
-    current_week_start = week_start_utc(now_utc)
-    prev_week_start = current_week_start - datetime.timedelta(days=7)
-    week_start_dt = datetime.datetime.combine(
-        current_week_start, datetime.time.min, tzinfo=datetime.UTC
-    )
 
     user_local_time: str | None = None
     if user_utterance.meta:
         raw_time = user_utterance.meta.get("user_local_time")
         if isinstance(raw_time, str):
             user_local_time = raw_time
+
+    # The same local week the summariser uses. Keeping these on separate clocks
+    # would, in the offset-sized window around the UTC boundary, have the reply
+    # ask for a week the summariser had not written under that key — the
+    # participant's memory would silently come back empty.
+    offset = extract_utc_offset(user_utterance.meta)
+    current_week_start = week_start_for(now_utc, offset)
+    prev_week_start = current_week_start - datetime.timedelta(days=7)
+    week_start_dt, _ = week_bounds_utc(current_week_start, offset)
 
     day_number, day_number_problem = _coerce_day_number(
         (user_utterance.meta or {}).get("day_number")
@@ -563,8 +581,8 @@ async def _process_queued_reply(
         )
         await session.commit()
 
-    provider = sp.provider if sp else "openai"
-    model_id = sp.model_id if sp else "gpt-4o-mini"
+    provider = sp.provider if sp else DEFAULT_LLM_PROVIDER
+    model_id = sp.model_id if sp else BEDROCK_DEFAULT_MODEL
     daily_content = daily_prompt.content if daily_prompt else None
 
     blocked, _, blocked_category, blocked_score = await _moderate_message(user_utterance)
@@ -637,9 +655,26 @@ async def _process_queued_reply(
         user_local_time=user_local_time,
     )
 
+    usage: dict[str, int] = {}
     reply_text = await _generate_reply(
-        chat_history, user_utterance.text, system_prompt, provider=provider, model_id=model_id
+        chat_history,
+        user_utterance.text,
+        system_prompt,
+        provider=provider,
+        model_id=model_id,
+        usage_out=usage,
     )
+
+    # What the participant receives is pruned; what is stored stays raw, so the
+    # study record and the texet_generation snapshot still show what the model
+    # actually produced. Moderation runs on the raw text — the artifact is not
+    # what makes a reply unsafe, and scoring the delivered copy would score
+    # something the model never said.
+    delivered_reply = strip_bracketed_segments(reply_text)
+    if not delivered_reply or not delivered_reply.strip():
+        # Nothing but an artifact. An empty SMS is worse than a late one, so
+        # this takes the generation-failure path and is retried.
+        raise RuntimeError("Reply contained nothing but bracketed segments.")
 
     reply_blocked, _, blocked_category, blocked_score = await _moderate_text(reply_text)
     if reply_blocked:
@@ -669,10 +704,13 @@ async def _process_queued_reply(
             user_id=user_id,
             bot_utterance_id=bot_utterance.id,
             stored_text=reply_text,
-            delivered_text=reply_text,
+            delivered_text=delivered_reply,
             final_status=UTTERANCE_STATUS_SENT,
             in_reply_to_utterance_id=user_utterance.id,
-            meta_updates={"texet_generation": generation_snapshot},
+            meta_updates=_merge_meta(
+                {"texet_generation": generation_snapshot},
+                {"texet_usage": usage} if usage else None,
+            ),
         )
 
 

@@ -21,6 +21,8 @@ from app.config import (
 )
 from app.console import console_router, init_console
 from app.db import get_async_session, ping_db
+from app.engagement.schemas import EngagementRow
+from app.engagement.service import compute_engagement
 from app.response import process_response
 from app.response.schemas import ResponseQueuedResponse, ResponseRequest
 from app.scheduler import start_scheduler, stop_scheduler
@@ -113,6 +115,31 @@ async def response(
     session: AsyncSession = Depends(get_async_session),
 ) -> ResponseQueuedResponse:
     return await process_response(session, payload)
+
+
+@app.get(
+    "/engagement",
+    response_model=list[EngagementRow],
+    dependencies=[Depends(require_auth)],
+)
+async def engagement(
+    start: datetime.date | None = None,
+    end: datetime.date | None = None,
+    session: AsyncSession = Depends(get_async_session),
+) -> list[EngagementRow]:
+    """Engagement per participant per pinged calendar day.
+
+    A day appears only if the chatbot pinged the participant on it, and counts
+    as engaged when they sent at least one message that same day. Days are the
+    participant's local days, so an evening reply is not pushed onto tomorrow.
+    """
+    if start is not None and end is not None and start > end:
+        raise HTTPException(
+            status_code=422,
+            detail="start must not be after end.",
+        )
+    rows = await compute_engagement(session, start=start, end=end)
+    return [EngagementRow(**row.as_dict()) for row in rows]
 
 
 @app.get("/", response_class=JSONResponse)

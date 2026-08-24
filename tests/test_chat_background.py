@@ -479,15 +479,15 @@ async def test_moderate_message_allows_when_scores_missing(
 async def test_moderate_message_blocks_when_score_exceeds_threshold(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    threshold = MODERATION_VALUES_FOR_BLOCKED["harassment"]
-    _stub_moderation_openai(monkeypatch, {"harassment": threshold + 0.01})
+    threshold = MODERATION_VALUES_FOR_BLOCKED["self-harm"]
+    _stub_moderation_openai(monkeypatch, {"self-harm": threshold + 0.01})
     utterance = Utterance(conversation_id="c-mod-2", speaker_id="u-mod-2", text="sample input")
 
     blocked, reason, category, score = await response_service._moderate_message(utterance)
 
     assert blocked is True
-    assert "harassment" in reason
-    assert category == "harassment"
+    assert "self-harm" in reason
+    assert category == "self-harm"
     assert score == pytest.approx(threshold + 0.01)
 
 
@@ -495,8 +495,8 @@ async def test_moderate_message_blocks_when_score_exceeds_threshold(
 async def test_moderate_message_allows_when_score_equals_threshold(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    threshold = MODERATION_VALUES_FOR_BLOCKED["hate"]
-    _stub_moderation_openai(monkeypatch, {"hate": threshold})
+    threshold = MODERATION_VALUES_FOR_BLOCKED["sexual"]
+    _stub_moderation_openai(monkeypatch, {"sexual": threshold})
     utterance = Utterance(conversation_id="c-mod-3", speaker_id="u-mod-3", text="sample input")
 
     blocked, reason, category, score = await response_service._moderate_message(utterance)
@@ -700,3 +700,80 @@ async def test_initial_bot_message_included_in_history_not_prompt(
     # And it is no longer duplicated into the system prompt.
     system_prompt = captured.get("system_prompt", "")
     assert opening_text not in str(system_prompt)
+
+
+# ---------------------------------------------------------------------------
+# Moderation scope: self-harm and sexual only
+# ---------------------------------------------------------------------------
+
+_ACTIVE_CATEGORIES = [
+    "self-harm",
+    "self-harm/instructions",
+    "self-harm/intent",
+    "sexual",
+    "sexual/minors",
+]
+
+_DISABLED_CATEGORIES = [
+    "harassment",
+    "harassment/threatening",
+    "hate",
+    "hate/threatening",
+    "violence",
+    "violence/graphic",
+]
+
+
+@pytest.mark.parametrize("category", _ACTIVE_CATEGORIES)
+@pytest.mark.asyncio
+async def test_self_harm_and_sexual_still_block(
+    category: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The two families the study actually moderates for."""
+    threshold = MODERATION_VALUES_FOR_BLOCKED[category]
+    assert threshold < 1.0, f"{category} must stay enforceable"
+
+    _stub_moderation_openai(monkeypatch, {category: threshold + 0.01})
+    utterance = Utterance(conversation_id="c-act", speaker_id="u-act", text="sample input")
+
+    blocked, _, blocked_category, _ = await response_service._moderate_message(utterance)
+
+    assert blocked is True
+    assert blocked_category == category
+
+
+@pytest.mark.parametrize("category", _DISABLED_CATEGORIES)
+@pytest.mark.asyncio
+async def test_other_categories_never_block_even_at_a_maximal_score(
+    category: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Threshold 1 is a real off switch, not merely a high bar: the comparison is
+    a strict '>' and moderation scores are bounded at 1.0, so nothing clears it.
+    It also matches the default already applied to unrecognised categories."""
+    assert MODERATION_VALUES_FOR_BLOCKED[category] == 1.0
+
+    _stub_moderation_openai(monkeypatch, {category: 1.0})
+    utterance = Utterance(conversation_id="c-off", speaker_id="u-off", text="sample input")
+
+    blocked, reason, blocked_category, score = await response_service._moderate_message(utterance)
+
+    assert blocked is False
+    assert (reason, blocked_category, score) == ("", "", 0.0)
+
+
+@pytest.mark.asyncio
+async def test_self_harm_still_wins_when_a_disabled_category_scores_higher(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A message can score on several categories at once. The disabled ones must
+    not shadow the one we care about, whatever order the API returns them in."""
+    _stub_moderation_openai(
+        monkeypatch,
+        {"violence": 0.99, "harassment": 0.95, "self-harm/intent": 0.75},
+    )
+    utterance = Utterance(conversation_id="c-mix", speaker_id="u-mix", text="sample input")
+
+    blocked, _, blocked_category, _ = await response_service._moderate_message(utterance)
+
+    assert blocked is True
+    assert blocked_category == "self-harm/intent"

@@ -1142,3 +1142,148 @@ async def test_response_backpressure_disabled_when_depth_is_zero(
             json={"user_id": f"u-nobp-{i}", "input": "hello"},
         )
         assert response.status_code == 202
+
+
+@pytest.mark.asyncio
+async def test_echoed_day_marker_is_pruned_from_the_sms_but_kept_in_the_record(
+    async_client: AsyncClient,
+    async_session: AsyncSession,
+    sms_outbox: list[dict[str, str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Prod delivered five of these. The participant gets clean text; the
+    stored utterance keeps the raw generation so the record stays faithful."""
+    raw = "Glad you rested.\n\n[Friday, August 21]\nGood morning!"
+
+    async def _reply_with_marker(*_args: object, **_kwargs: object) -> str:
+        return raw
+
+    monkeypatch.setattr(response_service, "_generate_reply", _reply_with_marker)
+
+    response = await async_client.post(
+        "/response",
+        headers={"Authorization": f"Bearer {API_KEY}"},
+        json={"user_id": "u-marker", "input": "slept ok"},
+    )
+    await _drain_replies(async_session)
+    assert response.status_code == 202
+
+    assert [entry["message"] for entry in sms_outbox] == ["Glad you rested.\n\nGood morning!"]
+
+    stored = await async_session.get(Utterance, response.json()["id"])
+    assert stored is not None
+    assert stored.status == UTTERANCE_STATUS_SENT
+    assert stored.text == raw
+
+
+@pytest.mark.asyncio
+async def test_reply_that_is_only_a_marker_fails_instead_of_sending_an_empty_sms(
+    async_client: AsyncClient,
+    async_session: AsyncSession,
+    sms_outbox: list[dict[str, str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pruning can empty a reply. An empty SMS is worse than none, so this
+    takes the existing generation-failure path and retries."""
+
+    async def _reply_all_marker(*_args: object, **_kwargs: object) -> str:
+        return "[Friday, August 21]"
+
+    monkeypatch.setattr(response_service, "_generate_reply", _reply_all_marker)
+
+    response = await async_client.post(
+        "/response",
+        headers={"Authorization": f"Bearer {API_KEY}"},
+        json={"user_id": "u-empty", "input": "hi"},
+    )
+    await _drain_replies(async_session)
+    assert response.status_code == 202
+
+    assert sms_outbox == []
+    stored = await async_session.get(Utterance, response.json()["id"])
+    assert stored is not None
+    assert stored.status != UTTERANCE_STATUS_SENT
+    assert stored.error is not None
+
+
+@pytest.mark.asyncio
+async def test_moderation_notice_is_not_pruned(
+    async_client: AsyncClient,
+    async_session: AsyncSession,
+    sms_outbox: list[dict[str, str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The notice is our own copy, not model output; pruning must not touch it."""
+
+    async def _blocked(_text: str) -> tuple[bool, str, str, float]:
+        return True, "", "self-harm", 0.91
+
+    monkeypatch.setattr(response_service, "_moderate_text", _blocked)
+
+    response = await async_client.post(
+        "/response",
+        headers={"Authorization": f"Bearer {API_KEY}"},
+        json={"user_id": "u-mod", "input": "hi"},
+    )
+    await _drain_replies(async_session)
+    assert response.status_code == 202
+
+    # The bot-source notice, delivered verbatim.
+    assert len(sms_outbox) == 1
+    assert sms_outbox[0]["message"] == (
+        "A generated reply was moderated due to self-harm content with score 0.91."
+    )
+
+
+@pytest.mark.asyncio
+async def test_token_usage_is_persisted_on_the_sent_reply(
+    async_client: AsyncClient,
+    async_session: AsyncSession,
+    sms_outbox: list[dict[str, str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The engagement endpoint reports token counts from this, so the usage the
+    provider reported has to survive as far as the utterance row."""
+
+    async def _reply_with_usage(
+        *_args: object, usage_out: dict[str, int] | None = None, **_kwargs: object
+    ) -> str:
+        if usage_out is not None:
+            usage_out.update({"prompt_tokens": 310, "completion_tokens": 88})
+        return "a reply"
+
+    monkeypatch.setattr(response_service, "_generate_reply", _reply_with_usage)
+
+    response = await async_client.post(
+        "/response",
+        headers={"Authorization": f"Bearer {API_KEY}"},
+        json={"user_id": "u-usage", "input": "hello"},
+    )
+    await _drain_replies(async_session)
+    assert response.status_code == 202
+
+    stored = await async_session.get(Utterance, response.json()["id"])
+    assert stored is not None
+    assert stored.status == UTTERANCE_STATUS_SENT
+    assert (stored.meta or {})["texet_usage"] == {"prompt_tokens": 310, "completion_tokens": 88}
+    # The generation snapshot is not displaced by it.
+    assert "texet_generation" in (stored.meta or {})
+
+
+@pytest.mark.asyncio
+async def test_no_usage_key_when_the_provider_reported_none(
+    async_client: AsyncClient,
+    async_session: AsyncSession,
+    sms_outbox: list[dict[str, str]],
+) -> None:
+    """Absent beats zero: a reply with unknown token cost must not read as free."""
+    response = await async_client.post(
+        "/response",
+        headers={"Authorization": f"Bearer {API_KEY}"},
+        json={"user_id": "u-nousage", "input": "hello"},
+    )
+    await _drain_replies(async_session)
+
+    stored = await async_session.get(Utterance, response.json()["id"])
+    assert stored is not None
+    assert "texet_usage" not in (stored.meta or {})

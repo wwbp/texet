@@ -246,3 +246,98 @@ def test_factory_openai_missing_key(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_factory_unknown_provider() -> None:
     with pytest.raises(ValueError, match="Unsupported provider"):
         create_engine("anthropic", "claude-3")
+
+
+# ---------------------------------------------------------------------------
+# Llama 4: the models prod actually runs on
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "model_id",
+    [
+        "meta.llama4-maverick-17b-instruct-v1:0",
+        "us.meta.llama4-maverick-17b-instruct-v1:0",
+        "meta.llama4-scout-17b-instruct-v1:0",
+        "us.meta.llama4-scout-17b-instruct-v1:0",
+    ],
+)
+def test_llama4_engines_declare_a_context_size(model_id: str) -> None:
+    """Prod replies run on us.meta.llama4-maverick-17b-instruct-v1:0, which was
+    missing from the table and so silently got the 8192 fallback — 15x under a
+    llama3-3 sibling. Weekly summaries are the largest single-message workload
+    in the system, so that fallback is what would clip them first."""
+    with patch("boto3.client"):
+        engine = BedrockEngine(model_id=model_id)
+    assert engine.max_context_size >= 128_000
+
+
+def test_unknown_model_still_falls_back() -> None:
+    """The fallback stays for genuinely unknown ids; only known ones are named."""
+    with patch("boto3.client"):
+        engine = BedrockEngine(model_id="meta.llama-does-not-exist-v9:0")
+    assert engine.max_context_size == 8192
+
+
+def test_the_pinned_summary_model_has_a_declared_context_size() -> None:
+    """Couples the pin to the table: pinning summaries to a model whose context
+    size is unknown would hand the largest prompt in the system the 8192
+    fallback, which is the failure this guards against."""
+    from app.engines.bedrock import _CONTEXT_SIZES
+    from app.summary.service import SUMMARY_MODEL_ID, SUMMARY_PROVIDER
+
+    assert SUMMARY_PROVIDER == "bedrock"
+    assert SUMMARY_MODEL_ID in _CONTEXT_SIZES
+
+
+# ---------------------------------------------------------------------------
+# Token usage: Bedrock returns it, the engine used to drop it
+# ---------------------------------------------------------------------------
+
+
+def _bedrock_response_with_usage(text: str, inp: int, out: int) -> dict:
+    return {
+        "output": {"message": {"content": [{"text": text}]}},
+        "usage": {"inputTokens": inp, "outputTokens": out, "totalTokens": inp + out},
+    }
+
+
+@pytest.mark.asyncio
+async def test_predict_surfaces_token_usage(bedrock_engine: BedrockEngine) -> None:
+    """Converse reports usage on every call; BedrockCompletion returned None for
+    both counts, so the only per-reply cost signal the app had was thrown away."""
+    bedrock_engine._call_bedrock = lambda *_a: _bedrock_response_with_usage("hi", 120, 45)  # type: ignore[method-assign]
+
+    completion = await bedrock_engine.predict([ChatMessage(role=ChatRole.USER, content="hello")])
+
+    assert completion.prompt_tokens == 120
+    assert completion.completion_tokens == 45
+    assert bedrock_engine.last_usage == {"prompt_tokens": 120, "completion_tokens": 45}
+
+
+@pytest.mark.asyncio
+async def test_predict_without_a_usage_block_reports_nothing(
+    bedrock_engine: BedrockEngine,
+) -> None:
+    """A response with no usage must not invent zeros — zero tokens and unknown
+    tokens are different facts, and the endpoint reports them differently."""
+    bedrock_engine._call_bedrock = lambda *_a: _make_bedrock_response("hi")  # type: ignore[method-assign]
+
+    completion = await bedrock_engine.predict([ChatMessage(role=ChatRole.USER, content="hello")])
+
+    assert completion.prompt_tokens is None
+    assert completion.completion_tokens is None
+    assert bedrock_engine.last_usage is None
+
+
+@pytest.mark.asyncio
+async def test_last_usage_reflects_the_most_recent_call(bedrock_engine: BedrockEngine) -> None:
+    """The engine is per-generation today, but a reused one must not report a
+    stale count for a call that returned none."""
+    bedrock_engine._call_bedrock = lambda *_a: _bedrock_response_with_usage("one", 10, 5)  # type: ignore[method-assign]
+    await bedrock_engine.predict([ChatMessage(role=ChatRole.USER, content="a")])
+    assert bedrock_engine.last_usage == {"prompt_tokens": 10, "completion_tokens": 5}
+
+    bedrock_engine._call_bedrock = lambda *_a: _make_bedrock_response("two")  # type: ignore[method-assign]
+    await bedrock_engine.predict([ChatMessage(role=ChatRole.USER, content="b")])
+    assert bedrock_engine.last_usage is None

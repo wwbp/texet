@@ -17,7 +17,12 @@ from app.response.crud import (
     get_or_create_speaker,
     get_weekly_summary,
 )
-from app.summary.service import build_week_transcript, generate_user_weekly_summary
+from app.summary.service import (
+    SUMMARY_MODEL_ID,
+    SUMMARY_PROVIDER,
+    build_week_transcript,
+    generate_user_weekly_summary,
+)
 
 _WEEK_START = datetime.date(2026, 4, 12)
 _WEEK_START_DT = datetime.datetime(2026, 4, 12, 0, 0, 0, tzinfo=datetime.UTC)
@@ -72,7 +77,9 @@ def test_build_week_transcript_empty_returns_empty_string() -> None:
 async def test_generate_user_weekly_summary_stores_result(
     async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def _fake_generate_reply(_history: list[object], query: str, system_prompt: str) -> str:
+    async def _fake_generate_reply(
+        _history: list[object], query: str, system_prompt: str, **_model: str
+    ) -> str:
         assert "user: hello" in query
         assert "bot:" in query
         return "User greeted the bot and had a brief exchange."
@@ -114,7 +121,9 @@ async def test_generate_user_weekly_summary_uses_db_summarization_prompt(
 ) -> None:
     captured: dict[str, str] = {}
 
-    async def _fake_generate_reply(_history: list[object], _query: str, system_prompt: str) -> str:
+    async def _fake_generate_reply(
+        _history: list[object], _query: str, system_prompt: str, **_model: str
+    ) -> str:
         captured["system_prompt"] = system_prompt
         return "summary"
 
@@ -140,7 +149,9 @@ async def test_generate_user_weekly_summary_falls_back_to_default_prompt(
 ) -> None:
     captured: dict[str, str] = {}
 
-    async def _fake_generate_reply(_history: list[object], _query: str, system_prompt: str) -> str:
+    async def _fake_generate_reply(
+        _history: list[object], _query: str, system_prompt: str, **_model: str
+    ) -> str:
         captured["system_prompt"] = system_prompt
         return "summary"
 
@@ -186,7 +197,9 @@ async def test_generate_user_weekly_summary_excludes_moderated_from_transcript(
 ) -> None:
     captured: dict[str, str] = {}
 
-    async def _fake_generate_reply(_history: list[object], query: str, _system_prompt: str) -> str:
+    async def _fake_generate_reply(
+        _history: list[object], query: str, _system_prompt: str, **_model: str
+    ) -> str:
         captured["query"] = query
         return "clean summary"
 
@@ -288,3 +301,56 @@ async def test_build_chat_history_since_timestamp_excludes_prior_week(
     texts = [m.content for m in history]
     assert "new message" in texts
     assert "old message" not in texts
+
+
+# ---------------------------------------------------------------------------
+# The summariser's model is named, not inherited
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_summary_runs_on_the_pinned_bedrock_llama_model(
+    async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The summariser used to call _generate_reply with no provider or model, so
+    it silently inherited that function's openai/gpt-4o-mini defaults while
+    replies ran on bedrock llama from the system_prompts row. Naming the model
+    here means an edit to those defaults can no longer move every participant's
+    summaries mid-study without this file being touched.
+    """
+    seen: dict[str, object] = {}
+
+    async def _capture(
+        _history: list[object],
+        query: str,
+        _prompt: str,
+        *,
+        provider: str,
+        model_id: str,
+    ) -> str:
+        seen["provider"] = provider
+        seen["model_id"] = model_id
+        return "a summary"
+
+    monkeypatch.setattr(response_service, "_generate_reply", _capture)
+
+    async with async_session.begin():
+        speaker = await get_or_create_speaker(async_session, "u-pin", meta={"type": "user"})
+        conversation = await get_or_create_conversation(async_session, speaker.id)
+        utt = await create_utterance(async_session, conversation.id, speaker.id, "hello")
+        utt.timestamp = _WEEK_MID_DT
+
+    generated = await generate_user_weekly_summary(async_session, "u-pin", _WEEK_START)
+
+    assert generated is True
+    assert seen == {
+        "provider": "bedrock",
+        "model_id": "us.meta.llama4-maverick-17b-instruct-v1:0",
+    }
+
+
+def test_summary_model_matches_the_constants_it_exports() -> None:
+    """The literals above are spelled out on purpose — a test that only compared
+    the constants to themselves would pass no matter what they drifted to."""
+    assert SUMMARY_PROVIDER == "bedrock"
+    assert SUMMARY_MODEL_ID == "us.meta.llama4-maverick-17b-instruct-v1:0"

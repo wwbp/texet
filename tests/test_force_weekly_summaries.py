@@ -23,7 +23,11 @@ from app.response.crud import (
     get_weekly_summary,
     upsert_weekly_summary,
 )
-from app.summary.service import force_weekly_summaries
+from app.summary.service import (
+    SUMMARY_MODEL_ID,
+    SUMMARY_PROVIDER,
+    force_weekly_summaries,
+)
 
 _WEEK_START = datetime.date(2026, 4, 12)  # a Sunday
 _WEEK_MID_DT = datetime.datetime(2026, 4, 14, 12, 0, tzinfo=datetime.UTC)
@@ -58,7 +62,15 @@ async def _seed_message(
 def counting_llm(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     generated: list[str] = []
 
-    async def _fake_generate_reply(_history: list[object], query: str, _prompt: str) -> str:
+    async def _fake_generate_reply(
+        _history: list[object],
+        query: str,
+        _prompt: str,
+        *,
+        provider: str,
+        model_id: str,
+    ) -> str:
+        assert (provider, model_id) == (SUMMARY_PROVIDER, SUMMARY_MODEL_ID)
         generated.append(query)
         return f"forced summary #{len(generated)}"
 
@@ -128,7 +140,7 @@ async def test_one_failure_does_not_block_the_rest(
     await _seed_message(async_session, "u-force-boom")
     await _seed_message(async_session, "u-force-fine")
 
-    async def _selective(_history: list[object], query: str, _prompt: str) -> str:
+    async def _selective(_history: list[object], query: str, _prompt: str, **_model: str) -> str:
         if "u-force-boom" in query:
             raise RuntimeError("context window exceeded")
         return "ok summary"
