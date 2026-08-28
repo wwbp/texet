@@ -1,474 +1,582 @@
 % SMART-R — architecture diagram set
 %
-% Four views, in the order they answer questions:
-%   1. Layering       — what kinds of thing exist, and who may call whom
-%   2. Architecture   — the two services and the components inside them
-%   3. Infrastructure — where it all runs
-%   4. Data flow      — what happens to one message, in order
+% Follows the C4 model (https://c4model.com), the common standard for
+% architecture diagrams that must serve technical and non-technical readers.
+% Four levels, each answering one question for one audience:
+%
+%   1. System context   — what is this, who uses it      (everyone)
+%   2. Containers       — what are the moving parts      (everyone; some detail)
+%   3. Deployment       — where does it run              (engineers)
+%   4. Message journey  — what happens to one message    (everyone; some detail)
+%
+% Naming rule: every box is Name / [Type] / one plain-English line. The name and
+% description read with no background knowledge; the bracketed type is there for
+% engineers and can be skipped by everyone else. Internal shorthand — repository
+% names, endpoint paths, "utterance", "worker", "hub" — appears only in the
+% bracketed type line, never as a box's name.
+%
+% Every page carries a legend, a scope line and a date, per the same standard.
 %
 % Build:  tectonic docs/architecture.tex
 %
-% Conventions carried over from architecture_diagram.tex: component/arr/darr/
-% lbl/num styles, %% ═══ section banners, and boundaries drawn on the
-% background layer with no fill so nested boxes stay visible.
-%
-% Positioning rule: nodes are placed at explicit coordinates rather than
-% chained with positioning, so a change to one box cannot silently shift the
-% rest of the diagram.
+% Editing notes, each learned the hard way:
+%   - Nodes sit at explicit coordinates, not `positioning` chains, so moving one
+%     box cannot silently shift the rest.
+%   - A TikZ style may NOT be named `small`: it collides with the font command
+%     pgf expands internally and fails as an undefined \tikzscope@linewidth.
+%   - A \\ inside a nested {\tiny ...} group breaks pgf's line splitter. Close
+%     and reopen the group around the break instead.
 
 \documentclass[11pt]{article}
 
-\usepackage[a3paper,landscape,margin=1.2cm]{geometry}
+\usepackage[a3paper,landscape,margin=1.1cm]{geometry}
 \usepackage{tikz}
-% tectonic runs XeTeX, so fontspec gives us the real Unicode glyphs the
-% diagrams use (em dashes, middle dots) instead of T1 fallback errors.
+% tectonic runs XeTeX, so fontspec gives the real Unicode glyphs the labels use.
 \usepackage{fontspec}
 \setmainfont{Helvetica}
-\setmonofont{Menlo}[Scale=0.88]
+\setmonofont{Menlo}[Scale=0.86]
 \usepackage{parskip}
-\usetikzlibrary{arrows.meta, positioning, fit, backgrounds, calc, shapes.geometric}
+\usetikzlibrary{arrows.meta, positioning, fit, backgrounds, calc}
 
 \pagestyle{empty}
 
+% Narrow boxes + justified text = words broken mid-syllable. Turn hyphenation
+% off everywhere; ragged edges read better than "lan-guage".
+\hyphenpenalty=10000
+\exhyphenpenalty=10000
+\tolerance=1000
+
 %% ════════════════════════════════════════════════
-%% Palette — one hue per owner, used consistently
-%% across all four diagrams.
-%%   blue   = hub          orange = texet
-%%   teal   = model        purple = external SaaS
-%%   green  = persistence  gray   = actors
+%% Palette. Colour encodes one thing only: who owns
+%% the box. The legend on every page says so.
 %% ════════════════════════════════════════════════
-\definecolor{hubc}{RGB}{31,95,153}
-\definecolor{texetc}{RGB}{201,105,30}
-\definecolor{modelc}{RGB}{22,122,116}
-\definecolor{extc}{RGB}{123,80,150}
+\definecolor{personc}{RGB}{86,74,118}
+\definecolor{studyc}{RGB}{31,95,153}
+\definecolor{chatc}{RGB}{193,101,29}
 \definecolor{datac}{RGB}{26,127,87}
-\definecolor{actorc}{RGB}{95,107,122}
+\definecolor{extc}{RGB}{116,116,124}
 \definecolor{inkc}{RGB}{31,35,40}
+\definecolor{mutec}{RGB}{110,118,129}
 
 \tikzset{
-  component/.style={
-    rectangle, rounded corners=4pt,
-    minimum width=3.1cm, minimum height=1.15cm,
-    draw, thick, align=center, font=\small, text=inkc
+  box/.style={
+    rectangle, rounded corners=3pt, draw, thick,
+    text width=3.5cm, align=center, inner sep=5pt,
+    font=\footnotesize, text=inkc, minimum height=1.5cm
   },
-  compact/.style={minimum width=2.7cm, minimum height=0.95cm, font=\scriptsize},
-  band/.style={
-    rectangle, rounded corners=6pt,
-    draw, thick, align=center, font=\small,
-    minimum height=1.5cm, text=inkc
-  },
-  bound/.style={
-    rectangle, rounded corners=10pt,
-    draw, line width=1.4pt, fill=none, inner sep=14pt
-  },
-  extbound/.style={
-    rectangle, rounded corners=6pt,
-    draw, thick, dashed, fill=none, inner sep=8pt
-  },
-  arr/.style={-{Stealth[length=6pt]}, thick},
-  darr/.style={{Stealth[length=6pt]}-{Stealth[length=6pt]}, thick},
-  lbl/.style={font=\scriptsize, midway, text=inkc, fill=white, inner sep=2pt},
-  num/.style={font=\scriptsize\bfseries, shape=circle, draw=gray!60,
-              fill=white, inner sep=1.5pt, minimum size=15pt, text=inkc},
-  note/.style={font=\scriptsize\itshape, text=actorc, align=left},
-  lifeline/.style={draw=gray!45, thick, dashed},
+  wide/.style={text width=4.7cm},
+  person/.style={box, fill=personc!14, draw=personc, rounded corners=13pt},
+  study/.style={box, fill=studyc!14, draw=studyc},
+  chat/.style={box, fill=chatc!14, draw=chatc},
+  store/.style={box, fill=datac!14, draw=datac},
+  ext/.style={box, fill=extc!12, draw=extc},
+  bound/.style={rectangle, rounded corners=9pt, draw, line width=1.2pt,
+                fill=none, inner sep=13pt, densely dashed},
+  arr/.style={-{Stealth[length=5pt]}, semithick, draw=mutec},
+  darr/.style={{Stealth[length=5pt]}-{Stealth[length=5pt]}, semithick, draw=mutec},
+  lbl/.style={font=\scriptsize, text=inkc, fill=white, inner sep=2pt, align=center},
+  num/.style={font=\scriptsize\bfseries, shape=circle, draw=mutec,
+              fill=white, inner sep=1.2pt, minimum size=14pt, text=inkc},
+  note/.style={font=\scriptsize, text=mutec, align=left},
+  life/.style={draw=mutec!55, semithick, densely dashed},
 }
 
-\newcommand{\diagramtitle}[2]{%
-  {\Large\bfseries #1}\\[2pt]
-  {\small\color{actorc} #2}\\[10pt]
+%% ════════════════════════════════════════════════
+%% Icons. Drawn in TikZ rather than imported, so the
+%% document stays self-contained and the glyphs scale
+%% with the page. Each uses `pic actions`, so colour
+%% and line width come from the call site.
+%% ════════════════════════════════════════════════
+\tikzset{
+  % stored information — the standard cylinder
+  dbicon/.pic={
+    \draw[pic actions] (-3mm,1.6mm) arc[start angle=180, end angle=360, x radius=3mm, y radius=1mm]
+      -- (3mm,1.6mm) arc[start angle=0, end angle=180, x radius=3mm, y radius=1mm] -- cycle;
+    \draw[pic actions, fill=none] (-3mm,1.6mm) -- (-3mm,-2.2mm)
+      arc[start angle=180, end angle=360, x radius=3mm, y radius=1mm] -- (3mm,1.6mm);
+    \draw[pic actions, fill=none] (-3mm,-0.4mm)
+      arc[start angle=180, end angle=360, x radius=3mm, y radius=1mm];
+  },
+  % a running application — a rack unit
+  srvicon/.pic={
+    \draw[pic actions] (-3.2mm,0.6mm) rectangle (3.2mm,2.4mm);
+    \draw[pic actions] (-3.2mm,-2.4mm) rectangle (3.2mm,-0.6mm);
+    \fill[pic actions, draw=none] (-2.4mm,1.2mm) rectangle (-1.8mm,1.8mm);
+    \fill[pic actions, draw=none] (-2.4mm,-1.8mm) rectangle (-1.8mm,-1.2mm);
+  },
+  % traffic director — one line in, several out
+  lbicon/.pic={
+    \draw[pic actions, fill=none] (-3.4mm,0) -- (-1mm,0);
+    \draw[pic actions] (-1mm,-1.8mm) rectangle (0.6mm,1.8mm);
+    \draw[pic actions, fill=none] (0.6mm,0) -- (1.6mm,0) -- (1.6mm,2mm) -- (3.4mm,2mm);
+    \draw[pic actions, fill=none] (1.6mm,0) -- (3.4mm,0);
+    \draw[pic actions, fill=none] (1.6mm,0) -- (1.6mm,-2mm) -- (3.4mm,-2mm);
+  },
+  % an outside supplier — a cloud
+  cloudicon/.pic={
+    \draw[pic actions] (-2.6mm,-1.1mm)
+      arc[start angle=270, end angle=90, radius=0.85mm]
+      arc[start angle=180, end angle=0, radius=1.15mm]
+      arc[start angle=150, end angle=30, radius=1.3mm]
+      arc[start angle=110, end angle=-20, radius=1.15mm] -- cycle;
+  },
+  % a person — head and shoulders, the C4 convention
+  personicon/.pic={
+    \draw[pic actions] (0,1.5mm) circle (1.1mm);
+    \draw[pic actions] (-2.1mm,-2.6mm) -- (-2.1mm,-1.3mm)
+      .. controls (-2.1mm,0.5mm) and (2.1mm,0.5mm) .. (2.1mm,-1.3mm)
+      -- (2.1mm,-2.6mm) -- cycle;
+  },
+  % the participant's handset
+  phoneicon/.pic={
+    \draw[pic actions, rounded corners=0.5mm] (-1.7mm,-2.6mm) rectangle (1.7mm,2.6mm);
+    \draw[pic actions, fill=none] (-0.6mm,2mm) -- (0.6mm,2mm);
+    \fill[pic actions, draw=none] (0,-2mm) circle (0.35mm);
+  },
 }
+
+% Place an icon straddling a box's top-left corner, masked so it sits cleanly
+% on the border. Usage: \ico{nodename}{dbicon}{colour}
+\newcommand{\ico}[3]{%
+  \pic[draw=#3, fill=#3!22, semithick] at ($(#1.north west)+(0.34,0.2)$) {#2};}
+
+% Name / [type] / description — the C4 element convention.
+\newcommand{\el}[3]{\textbf{#1}\\[1pt]{\tiny\color{mutec}[#2]}\\[2pt]{\scriptsize #3}}
+\newcommand{\es}[2]{\textbf{#1}\\[1pt]{\tiny\color{mutec}[#2]}}
+
+\newcommand{\pagehead}[3]{%
+  {\Large\bfseries #1}\\[3pt]
+  {\small\color{mutec} #2}\\[3pt]
+  {\scriptsize\color{mutec} #3}\\[12pt]
+}
+
+\newcommand{\swatch}[2]{%
+  \tikz\node[fill=#1!#2, draw=#1, rounded corners=2pt,
+             minimum width=0.42cm, minimum height=0.26cm]{};}
+\newcommand{\swatchp}{%
+  \tikz\node[fill=personc!14, draw=personc, rounded corners=7pt,
+             minimum width=0.42cm, minimum height=0.26cm]{};}
+
+% Legend repeated on every page, so the notation is never in question.
+\newcommand{\legend}{%
+  \begin{tikzpicture}[baseline]
+    \node[draw=mutec!40, rounded corners=5pt, fill=mutec!5, inner sep=8pt,
+          align=left, font=\scriptsize, text=inkc] {
+      \textbf{How to read this page}\qquad
+      \tikz[baseline=-2pt]\pic[draw=personc, fill=personc!22, semithick]{personicon};\;a person\quad
+      \tikz[baseline=-2pt]\pic[draw=mutec, fill=mutec!22, semithick]{srvicon};\;a running application\quad
+      \tikz[baseline=-2pt]\pic[draw=datac, fill=datac!22, semithick]{dbicon};\;stored information\quad
+      \tikz[baseline=-2pt]\pic[draw=mutec, fill=mutec!22, semithick]{lbicon};\;traffic director\quad
+      \tikz[baseline=-2pt]\pic[draw=extc, fill=extc!22, semithick]{cloudicon};\;outside supplier\\[4pt]
+      \hspace*{1pt}\swatch{studyc}{14}\;Study \& Messaging Service\quad
+      \swatch{chatc}{14}\;Chatbot Service\quad
+      \tikz[baseline=-2pt]\draw[arr] (0,0) -- (0.55,0);\;an arrow points at whatever is being asked to do something\quad
+      {\tiny[in brackets]}\;the technology — for engineers; skip it if it means nothing to you
+    };
+  \end{tikzpicture}}
 
 \begin{document}
 
 %% ════════════════════════════════════════════════
-%% 1 — LAYERING
-%% Bands stacked top to bottom; calls only ever go
-%% downward. The point of the view is the rule, not
-%% the boxes.
+%% 1 — SYSTEM CONTEXT  (C4 level 1)
+%% The whole system as a single box. No technology.
+%% This is the page to hand to someone who has never
+%% seen the system before.
 %% ════════════════════════════════════════════════
 \null\vfill
 \begin{center}
-\diagramtitle{1 — Layering}{%
-  What kinds of thing exist, and who may call whom. Every call travels
-  \emph{downward}; nothing in a lower band knows the band above it.}
+\pagehead{1 — System context}{%
+  What the system is, who uses it, and what it relies on. No technical knowledge needed.}{%
+  SMART-R text-messaging study \textbullet\ August 2026 \textbullet\
+  Scope: the whole system as one box. What is inside it is on page 2.}
 
-\begin{tikzpicture}[scale=1, transform shape]
+\begin{tikzpicture}
 
-  \def\lw{25cm}
+  \node[person, wide] (participant) at (0,0)
+    {\el{Study participant}{person}{Texts with the chatbot from their own phone.}};
+  \node[person, wide] (staff) at (0,-3.5)
+    {\el{Study staff}{person}{Enrol people, choose when messages go out, run the surveys.}};
+  \node[person, wide] (research) at (0,-7.0)
+    {\el{Research team}{person}{Read how much people are engaging, and the conversation records.}};
 
-  \node[band, fill=actorc!12, draw=actorc, minimum width=\lw] (l1) at (0,0)
-    {\textbf{Channel}\;\;\raisebox{0pt}{\scriptsize participant's phone\;\textbullet\;Twilio SMS\;\textbullet\;signature verification}};
+  \node[box, fill=studyc!8, draw=studyc, line width=1.3pt,
+        text width=6.2cm, minimum height=4cm] (system) at (9.0,-3.5)
+    {\el{SMART-R study system}{the system this document describes}{%
+      Sends each participant a check-in message every day, holds a text conversation
+      with them written by an AI language model, and records what happened so the
+      research team can study it.}};
 
-  \node[band, fill=hubc!12, draw=hubc, minimum width=\lw] (l2) at (0,-2.1)
-    {\textbf{Study orchestration}\;\;{\scriptsize enrollment\;\textbullet\;arms \& cohorts\;\textbullet\;send-time preferences\;\textbullet\;message templates\;\textbullet\;surveys}};
+  \node[ext, wide] (sms) at (18.2,0)
+    {\el{Text-message provider}{outside supplier}{Carries messages to and from participants' phones.}};
+  \node[ext, wide] (ai) at (18.2,-3.5)
+    {\el{AI language model}{outside supplier}{Writes each reply, and the weekly recap of a participant's conversation.}};
+  \node[ext, wide] (safety) at (18.2,-7.0)
+    {\el{Content safety check}{outside supplier}{Flags messages about self-harm or of a sexual nature.}};
+  \node[ext, wide] (survey) at (18.2,-10.4)
+    {\el{Survey \& sensing tools}{outside supplier}{Collect questionnaire answers and phone-sensor data.}};
 
-  \node[band, fill=texetc!12, draw=texetc, minimum width=\lw] (l3) at (0,-4.2)
-    {\textbf{Conversation}\;\;{\scriptsize utterances\;\textbullet\;chat history windowing\;\textbullet\;prompt composition\;\textbullet\;weekly summaries\;\textbullet\;engagement reporting}};
+  \ico{participant}{personicon}{personc}
+  \ico{staff}{personicon}{personc}
+  \ico{research}{personicon}{personc}
+  \ico{sms}{cloudicon}{extc}
+  \ico{ai}{cloudicon}{extc}
+  \ico{safety}{cloudicon}{extc}
+  \ico{survey}{cloudicon}{extc}
+  \ico{system}{srvicon}{studyc}
 
-  \node[band, fill=modelc!12, draw=modelc, minimum width=\lw] (l4) at (0,-6.3)
-    {\textbf{Model \& safety}\;\;{\scriptsize Bedrock Llama 4 generation\;\textbullet\;OpenAI moderation (self-harm, sexual)\;\textbullet\;token accounting}};
+  \draw[darr] (participant.east) -- node[lbl, above]{texts with} (system.north west);
+  \draw[arr] (staff.east) -- node[lbl, above]{sets the study up in} (system.west);
+  \draw[arr] (research.east) -- node[lbl, above]{reads reports from} (system.south west);
 
-  \node[band, fill=datac!12, draw=datac, minimum width=\lw] (l5) at (0,-8.4)
-    {\textbf{Persistence}\;\;{\scriptsize hub Postgres (participants, messages)\;\textbullet\;texet Postgres (speakers, utterances, prompts, summaries)}};
+  \draw[darr] (system.north east) -- node[lbl, above]{sends and receives\\messages through} (sms.west);
+  \draw[darr] (system.east) -- node[lbl, above]{asks for wording from} (ai.west);
+  \draw[arr] (system.south east) -- node[lbl, above]{screens messages with} (safety.west);
+  \draw[arr] (system.south) to[out=-55, in=180] node[lbl, pos=0.72, above]{points people at} (survey.west);
 
-  %% downward arrows on the left
-  \foreach \a/\b in {l1/l2, l2/l3, l3/l4, l4/l5} {
-    \draw[arr, gray!70] ($(\a.south) + (-10cm,0)$) -- ($(\b.north) + (-10cm,0)$);
-  }
-
-  %% the boundary that matters
-  \draw[dashed, thick, hubc]
-    ($(l2.south east) + (0.5cm,0)$) -- ($(l2.south west) + (-0.5cm,0)$);
-  \node[note, anchor=west, text=hubc]
-    at ($(l2.south east) + (0.7cm,0)$)
-    {\textbf{identity stops here}\\participant\_id only\\below this line};
-
-  %% ownership brackets on the right
-  \draw[hubc, line width=1.6pt]
-    ($(l2.north east) + (0.15cm,0)$) -- ($(l2.south east) + (0.15cm,0)$)
-    node[midway, anchor=west, xshift=0.1cm, font=\scriptsize\bfseries, text=hubc] {hub};
-  \draw[texetc, line width=1.6pt]
-    ($(l3.north east) + (0.15cm,0)$) -- ($(l4.south east) + (0.15cm,0)$)
-    node[midway, anchor=west, xshift=0.1cm, font=\scriptsize\bfseries, text=texetc] {texet};
-
-  \node[note, anchor=north west, text=actorc]
-    at ($(l5.south west) + (0,-0.5cm)$)
-    {Reading the view: a band may call the band below it, never the one above.
-     The hub never reads texet's tables and texet never reads the hub's;\\
-     the only traffic between them is the two HTTP calls in diagram~2.};
+  \node[note, anchor=north west] at (-0.3,-12.0)
+    {\textbf{The one thing to take away:} the part of the system that knows who a participant is —
+     their phone number and their enrolment — is deliberately kept apart from the part\\
+     that talks to the AI language model. The AI side only ever sees an anonymous participant
+     number. Page 2 shows that split.};
 
 \end{tikzpicture}
+
+\vspace{12pt}
+\legend
 \end{center}
 \vfill
 
 \clearpage
 
 %% ════════════════════════════════════════════════
-%% 2 — ARCHITECTURE
-%% The two services opened up, with the contract
-%% between them drawn explicitly.
+%% 2 — CONTAINERS  (C4 level 2)
+%% The system opened into its two services and their
+%% two stores.
 %% ════════════════════════════════════════════════
 \null\vfill
 \begin{center}
-\diagramtitle{2 — Architecture}{%
-  The two services and what lives inside each. They share no database;
-  the entire interface is the two numbered calls.}
+\pagehead{2 — The parts inside}{%
+  The system is two separate services with two separate stores of information.
+  They say only two things to each other.}{%
+  SMART-R text-messaging study \textbullet\ August 2026 \textbullet\
+  Scope: applications and stored information. Servers and networks are on page 3.}
 
 \begin{tikzpicture}
 
-  %% ---- actors (far left) ----
-  \node[component, fill=actorc!15, draw=actorc, compact] (phone) at (0,0)
-    {Participant\\{\tiny SMS}};
-  \node[component, fill=extc!15, draw=extc, compact] (twilio) at (0,-2.2)
-    {Twilio\\{\tiny SMS gateway}};
-  \node[component, fill=actorc!15, draw=actorc, compact] (research) at (19.6,-10.6)
-    {Research team};
+  \node[person] (participant) at (0,-1.0)
+    {\el{Study participant}{person}{Texts from their phone.}};
+  \node[ext] (sms) at (0,-4.2)
+    {\el{Text-message provider}{Twilio}{Carries the text messages.}};
+  \node[ext] (survey) at (0,-7.4)
+    {\el{Survey \& sensing}{Qualtrics, AWARE}{Questionnaires and sensor data.}};
 
-  %% ---- HUB components ----
-  \node[component, fill=hubc!18, draw=hubc] (hrecv) at (5.6,0)
-    {\texttt{/api/messages/}\\\texttt{receive}};
-  \node[component, fill=hubc!18, draw=hubc] (hcreate) at (5.6,-2.2)
-    {\texttt{/api/messages/}\\\texttt{create}};
-  \node[component, fill=hubc!18, draw=hubc] (hsched) at (5.6,-4.4)
-    {APScheduler\\{\tiny hourly · local hour}\\{\tiny matches preference}};
-  \node[component, fill=hubc!10, draw=hubc] (hstudy) at (5.6,-6.6)
-    {enrollment ·\\participants ·\\preferences · templates};
-  \node[component, fill=datac!18, draw=datac] (hdb) at (5.6,-8.8)
-    {Hub Postgres};
+  \node[study] (inbox) at (5.9,0)
+    {\el{Incoming message handler}{web service}{Takes each text and works out which day of the study it is.}};
+  \node[study] (outbox) at (5.9,-3.2)
+    {\el{Outgoing message sender}{web service}{Checks the person is still enrolled, splits long replies, sends them.}};
+  \node[study] (timer) at (5.9,-6.4)
+    {\el{Daily check-in timer}{scheduled, runs hourly}{Sends each participant their opener at the hour they chose.}};
+  \node[study] (records) at (5.9,-9.6)
+    {\el{Participant records}{web service}{Enrolment, phone numbers, preferred times, message wording.}};
+  \node[store] (studydb) at (5.9,-12.6)
+    {\el{Study information}{database}{People, enrolments, messages sent.}};
 
   \begin{scope}[on background layer]
-    \node[bound, draw=hubc, fit=(hrecv)(hcreate)(hsched)(hstudy)(hdb),
-          label={[text=hubc, font=\small\bfseries]above:HUB · Texet-Twilio}] (hubbox) {};
+    \node[bound, draw=studyc, fit=(inbox)(outbox)(timer)(records)(studydb),
+          label={[text=studyc, font=\small\bfseries]above:Study \& Messaging Service}] (studybox) {};
   \end{scope}
 
-  %% ---- TEXET components ----
-  \node[component, fill=texetc!18, draw=texetc] (tresp) at (13.4,-1.1)
-    {\texttt{POST /response}\\{\tiny enqueue · return 202}};
-  \node[component, fill=texetc!18, draw=texetc] (tworker) at (13.4,-3.6)
-    {reply worker\\{\tiny claim · moderate ·}\\{\tiny generate · prune · send}};
-  \node[component, fill=texetc!18, draw=texetc] (tsum) at (13.4,-6.0)
-    {summary job\\{\tiny hourly · each}\\{\tiny participant's local week}};
-  \node[component, fill=texetc!18, draw=texetc] (teng) at (13.4,-8.2)
-    {\texttt{GET /engagement}\\{\tiny + \texttt{/console}}};
-  \node[component, fill=datac!18, draw=datac] (tdb) at (13.4,-10.4)
-    {Texet Postgres};
+  \node[chat] (receive) at (13.6,-0.5)
+    {\el{Message intake}{web service}{Accepts a message, files it, and answers back straight away.}};
+  \node[chat] (gen) at (13.6,-3.8)
+    {\el{Reply writer}{runs in the background}{Screens the message, gathers context, asks the AI model, tidies the reply.}};
+  \node[chat] (recap) at (13.6,-7.1)
+    {\el{Weekly recap writer}{scheduled, runs hourly}{Sums up a participant's week once their own week has finished.}};
+  \node[chat] (report) at (13.6,-10.2)
+    {\el{Reports}{web service and admin pages}{Engagement figures, message wording, delivery problems.}};
+  \node[store] (chatdb) at (13.6,-13.0)
+    {\el{Conversation information}{database}{Messages, wording, weekly recaps.}};
 
   \begin{scope}[on background layer]
-    \node[bound, draw=texetc, fit=(tresp)(tworker)(tsum)(teng)(tdb),
-          label={[text=texetc, font=\small\bfseries]above:TEXET · this repo}] (texetbox) {};
+    \node[bound, draw=chatc, fit=(receive)(gen)(recap)(report)(chatdb),
+          label={[text=chatc, font=\small\bfseries]above:Chatbot Service}] (chatbox) {};
   \end{scope}
 
-  %% ---- external model / SaaS (far right) ----
-  \node[component, fill=modelc!18, draw=modelc, compact] (bedrock) at (19.6,-3.0)
-    {AWS Bedrock\\{\tiny Llama 4 Maverick}};
-  \node[component, fill=extc!15, draw=extc, compact] (moder) at (19.6,-5.2)
-    {OpenAI\\{\tiny omni-moderation}};
-  \node[component, fill=extc!15, draw=extc, compact] (qual) at (0,-6.6)
-    {Qualtrics · AWARE};
+  \node[ext] (ai) at (20.8,-3.8)
+    {\el{AI language model}{Amazon Bedrock, Llama 4}{Writes replies and recaps.}};
+  \node[ext] (safety) at (20.8,-7.1)
+    {\el{Content safety check}{OpenAI}{Flags self-harm and sexual content.}};
+  \node[person] (research) at (20.8,-10.2)
+    {\el{Research team}{person}{Reads the reports.}};
 
-  %% ---- flows ----
-  \draw[darr, actorc] (phone) -- node[lbl]{SMS} (twilio);
-  \draw[arr] (twilio.east) -- node[lbl, above]{webhook} (hrecv.west);
-  \draw[arr] (hcreate.west) -- node[lbl, below]{send} (twilio.east);
+  \ico{participant}{personicon}{personc}
+  \ico{research}{personicon}{personc}
+  \ico{sms}{cloudicon}{extc}
+  \ico{survey}{cloudicon}{extc}
+  \ico{ai}{cloudicon}{extc}
+  \ico{safety}{cloudicon}{extc}
+  \ico{inbox}{srvicon}{studyc}
+  \ico{outbox}{srvicon}{studyc}
+  \ico{timer}{srvicon}{studyc}
+  \ico{records}{srvicon}{studyc}
+  \ico{studydb}{dbicon}{datac}
+  \ico{receive}{srvicon}{chatc}
+  \ico{gen}{srvicon}{chatc}
+  \ico{recap}{srvicon}{chatc}
+  \ico{report}{srvicon}{chatc}
+  \ico{chatdb}{dbicon}{datac}
 
-  \draw[arr, hubc, line width=1.2pt] (hrecv.east) -- node[num, pos=0.5]{1} (tresp.west);
-  \draw[arr, hubc, line width=1.2pt, densely dashed] (hsched.east) to[out=15, in=250]
-    node[num, pos=0.45]{1} node[lbl, pos=0.18, below]{daily ping} (tresp.south);
-  \draw[arr, texetc, line width=1.2pt] (tworker.west) to[out=170, in=-15]
-    node[num, pos=0.5]{2} (hcreate.south east);
+  \draw[darr] (participant) -- node[lbl]{texts} (sms);
+  \draw[arr] (sms.east) to[out=20, in=180] node[lbl, pos=0.62, above]{hands the text to} (inbox.west);
+  \draw[arr] (outbox.west) to[out=180, in=-20] node[lbl, pos=0.38, below]{sends} (sms.east);
+  \draw[darr] (survey.east) -- node[lbl, above]{feeds} (records.west);
 
-  \draw[darr] (tworker.east) -- node[lbl, above]{generate} (bedrock.west);
-  \draw[darr] (tworker.east) to[out=0, in=180] node[lbl, pos=0.7, above]{moderate} (moder.west);
-  \draw[darr] (tsum.east) to[out=0, in=200] (bedrock.south east);
-  \draw[darr, extc] (hstudy.west) -- node[lbl, above]{surveys} (qual.east);
+  \draw[arr, draw=studyc, thick] (inbox.east) -- node[num, pos=0.5]{1} (receive.west);
+  \draw[arr, draw=studyc, thick, densely dashed] (timer.east) to[out=10, in=245]
+    node[num, pos=0.3]{1} node[lbl, pos=0.08, below]{daily opener} (receive.south);
+  \draw[arr, draw=chatc, thick] (gen.west) to[out=175, in=-12]
+    node[num, pos=0.5]{2} (outbox.south east);
 
-  \draw[arr, actorc] (research.west) to[out=180, in=-20]
-    node[lbl, above]{bearer / login} (teng.south east);
+  \draw[darr] (gen.east) -- node[lbl, above]{asks} (ai.west);
+  \draw[darr] (gen.east) to[out=-18, in=170] node[lbl, pos=0.68, above]{screens with} (safety.west);
+  \draw[darr] (recap.east) to[out=12, in=205] (ai.south west);
+  \draw[arr] (research.west) -- node[lbl, above]{reads} (report.east);
 
-  \draw[darr, datac] (hstudy) -- (hdb);
-  \draw[darr, datac] (teng) -- (tdb);
+  \draw[darr, draw=datac] (records) -- (studydb);
+  \draw[darr, draw=datac] (report) -- (chatdb);
 
-  %% ---- contract legend ----
-  \node[draw=gray!40, rounded corners=6pt, fill=gray!5, inner sep=9pt,
-        align=left, font=\scriptsize, anchor=north west, text=inkc]
-    at (0.2,-10.2) {
-    \textbf{The contract — the whole interface}\\[5pt]
-    \textcircled{1}\enspace \textbf{hub $\rightarrow$ texet}\quad\texttt{POST /response}\\
-    \hspace{1.4em} \texttt{user\_id}, \texttt{input}, \texttt{metadata\{}\\
-    \hspace{2.2em} \texttt{is\_initial}, \texttt{day\_number}, \texttt{user\_local\_time\}}\\
-    \hspace{1.4em} \textit{is\_initial=true $\Rightarrow$ store the opener, no model call}\\[5pt]
-    \textcircled{2}\enspace \textbf{texet $\rightarrow$ hub}\quad\texttt{POST /api/messages/create}\\
-    \hspace{1.4em} \texttt{participant\_id}, \texttt{message}, \texttt{utterance\_id}\\
-    \hspace{1.4em} \textit{hub re-checks enrolment, segments, sends}\\[5pt]
-    Both bearer-authenticated. No shared database.
+  \node[draw=mutec!40, rounded corners=5pt, fill=mutec!5, inner sep=9pt,
+        align=left, font=\scriptsize, text=inkc, anchor=north] at (10.4,-15.0) {
+    \textbf{The only two things these services say to each other}\\[5pt]
+    \textcircled{1}\;\textbf{``Here is a message.''}\; Study \& Messaging $\rightarrow$ Chatbot.
+    Carries the anonymous participant number, the text, which day of the study it is,
+    and the participant's local time.\\
+    \hspace{1.3em} A daily opener is marked as one, and is simply filed — the AI model is not asked for anything.\\[4pt]
+    \textcircled{2}\;\textbf{``Here is a reply. Please send it.''}\; Chatbot $\rightarrow$ Study \& Messaging.
+    Carries the participant number and the reply text.\\[4pt]
+    Neither service can read the other's stored information, and both requests need a password.
   };
 
 \end{tikzpicture}
+
+\vspace{10pt}
+\legend
 \end{center}
 \vfill
-
 
 \clearpage
 
 %% ════════════════════════════════════════════════
-%% 3 — INFRASTRUCTURE
-%% Where it runs. Boundaries are drawn inside-out so
-%% every fit() has its targets already defined, and
-%% carry no fill so nested boxes stay visible.
+%% 3 — DEPLOYMENT
+%% Written for engineers, and labelled as such.
+%% Boundaries are built inside-out so every fit()
+%% has its targets already defined.
 %% ════════════════════════════════════════════════
 \null\vfill
 \begin{center}
-\diagramtitle{3 — Infrastructure}{%
-  Two Elastic Beanstalk applications in one AWS account, each with its own RDS in a
-  private subnet. Nothing outside AWS reaches a database.}
+\pagehead{3 — Where it runs}{%
+  Both services run in a single Amazon Web Services account. Each keeps its own store of
+  information, and neither store can be reached from the internet.}{%
+  SMART-R text-messaging study \textbullet\ August 2026 \textbullet\
+  Scope: servers, networks and hosting. This page is written for engineers.}
 
 \begin{tikzpicture}
 
-  %% ---- hub environment (innermost first) ----
-  \node[component, fill=hubc!18, draw=hubc] (heb) at (5.2,-3.4)
-    {EB · \texttt{twilio-*}}
-    ;
-  \node[component, fill=datac!18, draw=datac] (hrds) at (5.2,-6.0)
-    {RDS}
-    ;
-  \node[font=\tiny, text=inkc, align=center] at (5.2,-4.35) {FastAPI + APScheduler};
-  \node[font=\tiny, text=inkc, align=center] at (5.2,-6.95) {hub Postgres};
+  \node[study, text width=4.1cm] (studyapp) at (5.6,-3.2)
+    {\el{Study \& Messaging Service}{Elastic Beanstalk}{The web service and the hourly timer.}};
+  \node[store, text width=4.1cm] (studydb) at (5.6,-6.7)
+    {\el{Study information}{Amazon RDS, PostgreSQL}{No public address.}};
 
   \begin{scope}[on background layer]
-    \node[bound, draw=hubc!60, densely dashed, fit=(heb)(hrds),
-          label={[text=hubc!70, font=\tiny\bfseries]below:Private subnet}] (hpriv) {};
+    \node[bound, draw=studyc!65, fit=(studyapp)(studydb),
+          label={[text=studyc!75, font=\tiny\bfseries]below:Private network area}] (studypriv) {};
   \end{scope}
 
-  %% ---- texet environment ----
-  \node[component, fill=texetc!18, draw=texetc] (tapi) at (11.6,-3.4)
-    {EB · \texttt{bot-prod}}
-    ;
-  \node[component, fill=datac!18, draw=datac] (trds) at (11.6,-6.0)
-    {RDS}
-    ;
-  \node[font=\tiny, text=inkc, align=center] at (11.6,-4.35) {api + reply worker};
-  \node[font=\tiny, text=inkc, align=center] at (11.6,-6.95) {texet Postgres};
+  \node[chat, text width=4.1cm] (chatapp) at (12.9,-3.2)
+    {\el{Chatbot Service}{Elastic Beanstalk}{The web service and the reply writer.}};
+  \node[store, text width=4.1cm] (chatdb) at (12.9,-6.7)
+    {\el{Conversation information}{Amazon RDS, PostgreSQL}{No public address.}};
 
   \begin{scope}[on background layer]
-    \node[bound, draw=texetc!60, densely dashed, fit=(tapi)(trds),
-          label={[text=texetc!70, font=\tiny\bfseries]below:Private subnet}] (tpriv) {};
+    \node[bound, draw=chatc!65, fit=(chatapp)(chatdb),
+          label={[text=chatc!75, font=\tiny\bfseries]below:Private network area}] (chatpriv) {};
   \end{scope}
 
-  %% ---- public subnet: the two load balancers ----
-  \node[component, fill=hubc!10, draw=hubc] (halb) at (5.2,-0.4) {ALB};
-  \node[component, fill=texetc!10, draw=texetc] (talb) at (11.6,-0.4) {ALB};
+  \node[box, fill=mutec!8, draw=mutec, text width=4.1cm, minimum height=1.05cm] (studylb) at (5.6,0)
+    {\es{Traffic director}{load balancer}};
+  \node[box, fill=mutec!8, draw=mutec, text width=4.1cm, minimum height=1.05cm] (chatlb) at (12.9,0)
+    {\es{Traffic director}{load balancer}};
 
   \begin{scope}[on background layer]
-    \node[bound, draw=gray!60, densely dashed, fit=(halb)(talb),
-          label={[text=gray!70, font=\tiny\bfseries]above:Public subnet}] (pub) {};
+    \node[bound, draw=mutec!70, fit=(studylb)(chatlb),
+          label={[text=mutec, font=\tiny\bfseries]above:Public area — the only part reachable from the internet}] (pub) {};
   \end{scope}
 
-  %% ---- VPC ----
   \begin{scope}[on background layer]
-    \node[bound, draw=hubc!80, line width=1.6pt, fit=(pub)(hpriv)(tpriv),
-          label={[text=hubc, font=\footnotesize\bfseries]above left:VPC}] (vpc) {};
+    \node[bound, draw=studyc, line width=1.5pt, densely dotted,
+          fit=(pub)(studypriv)(chatpriv),
+          label={[text=studyc, font=\footnotesize\bfseries]above left:Private network}] (vpc) {};
   \end{scope}
 
-  %% ---- Bedrock: same account, outside the VPC ----
-  \node[component, fill=modelc!18, draw=modelc] (bedrock) at (8.4,-9.6)
-    {AWS Bedrock};
-  \node[font=\tiny, text=inkc] at (8.4,-10.35) {Llama 4 Maverick · us-east-1};
+  \node[ext, text width=4.1cm] (ai) at (9.2,-10.8)
+    {\el{AI language model}{Amazon Bedrock, Llama 4}{Same AWS account, outside the private network.}};
 
-  %% ---- AWS boundary ----
   \begin{scope}[on background layer]
-    \node[bound, draw=orange!80, densely dashed, line width=1.4pt,
-          fit=(vpc)(bedrock),
-          label={[text=orange!80, font=\small\bfseries]above left:AWS account 848180123498}] (aws) {};
+    \node[bound, draw=orange!85, line width=1.3pt, fit=(vpc)(ai),
+          label={[text=orange!85, font=\small\bfseries]above left:Amazon Web Services account}] (aws) {};
   \end{scope}
 
-  %% ---- outside AWS ----
-  \node[component, compact, fill=actorc!15, draw=actorc] (phone) at (-3.6,-0.4)
-    {Participant};
-  \node[component, compact, fill=extc!15, draw=extc] (twilio) at (-3.6,-3.4)
-    {Twilio};
-  \node[component, compact, fill=extc!15, draw=extc] (qual) at (-3.6,-6.4)
-    {Qualtrics · AWARE};
-  \node[component, compact, fill=extc!15, draw=extc] (openai) at (19.2,-3.4)
-    {OpenAI};
-  \node[font=\tiny, text=inkc] at (19.2,-4.15) {moderation};
-  \node[component, compact, fill=extc!15, draw=extc] (smtp) at (19.2,-6.4)
-    {Gmail SMTP};
-  \node[font=\tiny, text=inkc] at (19.2,-7.15) {moderation alerts};
-  \node[component, compact, fill=gray!15, draw=gray!60] (gha) at (19.2,-0.4)
-    {GitHub Actions};
-  \node[font=\tiny, text=inkc] at (19.2,-1.15) {CI $\rightarrow$ CD on \texttt{main}};
+  \node[ext] (sms) at (-1.6,-1.6) {\el{Text-message provider}{Twilio}{}};
+  \node[ext] (survey) at (-1.6,-5.6) {\el{Survey \& sensing}{Qualtrics, AWARE}{}};
+  \node[ext] (safety) at (20.0,-1.6) {\el{Content safety check}{OpenAI}{}};
+  \node[ext] (mail) at (20.0,-5.2) {\el{Alert email}{Gmail}{Safety alerts to the study team.}};
+  \node[ext] (ci) at (20.0,-8.8) {\el{Build \& release}{GitHub Actions}{Releases automatically; no manual step.}};
 
-  %% ---- connections ----
-  \draw[darr, actorc] (phone) -- (twilio);
-  \draw[arr] (twilio.east) to[out=0, in=180] node[lbl, above]{HTTPS} (halb.west);
-  \draw[arr] (qual.east) to[out=0, in=190] (heb.west);
-  \draw[arr] (halb) -- (heb);
-  \draw[arr] (talb) -- (tapi);
-  \draw[darr, datac] (heb) -- (hrds);
-  \draw[darr, datac] (tapi) -- (trds);
-  \draw[darr, hubc, line width=1.1pt] (heb.east) -- node[lbl, above]{\textcircled{1} \textcircled{2}} (tapi.west);
-  \draw[darr, modelc] (tapi.south) to[out=-90, in=20] (bedrock.north east);
-  \draw[darr, extc] (tapi.east) to[out=0, in=180] (openai.west);
-  \draw[arr, extc] (tapi.east) to[out=-20, in=180] (smtp.west);
-  \draw[arr, gray!70] (gha.west) to[out=180, in=30] node[lbl, above]{deploy} (talb.north east);
+  \ico{studyapp}{srvicon}{studyc}
+  \ico{chatapp}{srvicon}{chatc}
+  \ico{studydb}{dbicon}{datac}
+  \ico{chatdb}{dbicon}{datac}
+  \ico{studylb}{lbicon}{mutec}
+  \ico{chatlb}{lbicon}{mutec}
+  \ico{ai}{cloudicon}{extc}
+  \ico{sms}{cloudicon}{extc}
+  \ico{survey}{cloudicon}{extc}
+  \ico{safety}{cloudicon}{extc}
+  \ico{mail}{cloudicon}{extc}
+  \ico{ci}{cloudicon}{extc}
 
-  \node[note, anchor=north west]
-    at ($(aws.south west) + (0,-0.4cm)$)
-    {Both RDS instances are private: no public IP, no bastion. Reaching one means SSM Run Command
-     onto the EB instance, then \texttt{docker exec} into the app container.\\
-     Bedrock calls authenticate with the \emph{shared} \texttt{aws-elasticbeanstalk-ec2-role} —
-     texet has no service account of its own, so Bedrock spend cannot be attributed to it.};
+  \draw[arr] (sms.east) to[out=0, in=180] node[lbl, above]{secure web} (studylb.west);
+  \draw[arr] (survey.east) to[out=0, in=192] (studyapp.west);
+  \draw[arr] (studylb) -- (studyapp);
+  \draw[arr] (chatlb) -- (chatapp);
+  \draw[darr, draw=datac] (studyapp) -- (studydb);
+  \draw[darr, draw=datac] (chatapp) -- (chatdb);
+  \draw[darr, draw=studyc, thick] (studyapp.east) --
+    node[lbl, above]{\textcircled{1} \textcircled{2}} (chatapp.west);
+  \draw[darr] (chatapp.south) to[out=-90, in=25] (ai.north east);
+  \draw[darr] (chatapp.east) to[out=0, in=180] (safety.west);
+  \draw[arr] (chatapp.east) to[out=-22, in=180] (mail.west);
+  \draw[arr] (ci.west) to[out=180, in=-25] node[lbl, above]{releases} (chatlb.south east);
+
+  \node[note, anchor=north west] at (-2.1,-13.9)
+    {Neither store of information has a public address, and there is no jump box. Reaching one means
+     running a command on the server through AWS Systems Manager, then stepping into the\\
+     running application. The Chatbot Service calls the AI model using the \emph{shared} Elastic
+     Beanstalk server identity rather than one of its own, so what this study spends on the AI model
+     cannot be separated from what other projects in the account spend.};
 
 \end{tikzpicture}
+
+\vspace{10pt}
+\legend
 \end{center}
 \vfill
 
 \clearpage
 
 %% ════════════════════════════════════════════════
-%% 4 — DATA FLOW
-%% One inbound message, top to bottom. Lifelines are
-%% vertical; every arrow is numbered in order.
+%% 4 — MESSAGE JOURNEY
+%% A sequence view in plain sentences. Every step is
+%% something happening, not a function being called.
 %% ════════════════════════════════════════════════
 \null\vfill
 \begin{center}
-\diagramtitle{4 — Data flow}{%
-  One participant message, in order. The 202 at step 5 is the point of the design:
-  the HTTP call returns before any model work begins.}
+\pagehead{4 — What happens to one message}{%
+  A participant sends a text and gets a reply. Read top to bottom; each numbered step
+  is one thing happening.}{%
+  SMART-R text-messaging study \textbullet\ August 2026 \textbullet\
+  Scope: one incoming message. A daily opener is simply filed and skips steps 6--11.}
 
-\begin{tikzpicture}[yscale=1]
+\begin{tikzpicture}
 
-  %% ---- lifeline heads ----
-  \def\ytop{0}
-  \def\ybot{-15.4}
+  \def\ybot{-14.8}
 
-  \node[component, compact, fill=actorc!15, draw=actorc] (a1) at (0,\ytop) {Participant};
-  \node[component, compact, fill=extc!15, draw=extc]     (a2) at (3.8,\ytop) {Twilio};
-  \node[component, compact, fill=hubc!18, draw=hubc]     (a3) at (7.8,\ytop) {Hub};
-  \node[component, compact, fill=texetc!18, draw=texetc] (a4) at (12.2,\ytop) {Texet API};
-  \node[component, compact, fill=texetc!18, draw=texetc] (a5) at (16.6,\ytop) {Reply worker};
-  \node[component, compact, fill=modelc!18, draw=modelc] (a6) at (21.0,\ytop) {Bedrock /\\OpenAI};
-  \node[component, compact, fill=datac!18, draw=datac]   (a7) at (25.0,\ytop) {Texet DB};
+  \node[person, text width=3.0cm, minimum height=1.05cm] (a1) at (0,0)
+    {\es{Participant}{person}};
+  \node[ext, text width=3.0cm, minimum height=1.05cm] (a2) at (3.9,0)
+    {\es{Text provider}{Twilio}};
+  \node[study, text width=3.0cm, minimum height=1.05cm] (a3) at (7.9,0)
+    {\es{Study \& Messaging}{service}};
+  \node[chat, text width=3.0cm, minimum height=1.05cm] (a4) at (12.2,0)
+    {\es{Message intake}{Chatbot Service}};
+  \node[chat, text width=3.0cm, minimum height=1.05cm] (a5) at (16.5,0)
+    {\es{Reply writer}{Chatbot Service}};
+  \node[ext, text width=3.0cm, minimum height=1.05cm] (a6) at (20.8,0)
+    {\es{AI model \& safety check}{outside suppliers}};
+  \node[store, text width=3.0cm, minimum height=1.05cm] (a7) at (24.7,0)
+    {\es{Conversation information}{database}};
 
   \foreach \n in {a1,a2,a3,a4,a5,a6,a7} {
-    \draw[lifeline] (\n.south) -- ($(\n.south) + (0,\ybot)$);
+    \draw[life] (\n.south) -- ($(\n.south) + (0,\ybot)$);
   }
 
-  %% helper: step arrow
-  \newcommand{\step}[5]{%
-    \draw[arr] ($(#1.south) + (0,#3)$) -- ($(#2.south) + (0,#3)$)
-      node[num, pos=0.5]{#4};
+  \ico{a1}{personicon}{personc}
+  \ico{a2}{cloudicon}{extc}
+  \ico{a3}{srvicon}{studyc}
+  \ico{a4}{srvicon}{chatc}
+  \ico{a5}{srvicon}{chatc}
+  \ico{a6}{cloudicon}{extc}
+  \ico{a7}{dbicon}{datac}
+
+  \newcommand{\hop}[5]{%
+    \draw[arr] ($(#1.south) + (0,#3)$) -- ($(#2.south) + (0,#3)$) node[num, pos=0.5]{#4};
     \node[font=\scriptsize, text=inkc, anchor=south, align=center]
-      at ($($(#1.south)!0.5!(#2.south)$) + (0,#3+0.18)$) {#5};
-  }
+      at ($($(#1.south)!0.5!(#2.south)$) + (0,#3+0.16)$) {#5};}
+  \newcommand{\hopb}[5]{%
+    \draw[darr] ($(#1.south) + (0,#3)$) -- ($(#2.south) + (0,#3)$) node[num, pos=0.5]{#4};
+    \node[font=\scriptsize, text=inkc, anchor=south, align=center]
+      at ($($(#1.south)!0.5!(#2.south)$) + (0,#3+0.16)$) {#5};}
 
-  \step{a1}{a2}{-0.9}{1}{SMS}
-  \step{a2}{a3}{-1.9}{2}{webhook · signature verified}
-  \step{a3}{a4}{-2.9}{3}{\texttt{POST /response} · \texttt{day\_number}, \texttt{user\_local\_time}}
+  \hop{a1}{a2}{-0.85}{1}{sends a text}
+  \hop{a2}{a3}{-1.8}{2}{passes it on, proving it really came from the provider}
+  \hop{a3}{a4}{-2.75}{3}{hands over the message, the day of the study, and the local time}
+  \hop{a4}{a7}{-3.7}{4}{files the message and puts the reply on a to-do list}
 
-  \draw[arr] ($(a4.south) + (0,-3.9)$) -- ($(a7.south) + (0,-3.9)$) node[num, pos=0.5]{4};
+  \draw[arr, draw=studyc] ($(a4.south) + (0,-4.65)$) -- ($(a3.south) + (0,-4.65)$)
+    node[num, pos=0.5]{5};
   \node[font=\scriptsize, text=inkc, anchor=south]
-    at ($($(a4.south)!0.5!(a7.south)$) + (0,-3.72)$) {insert user utterance + queued bot utterance · \texttt{NOTIFY}};
+    at ($($(a3.south)!0.5!(a4.south)$) + (0,-4.49)$)
+    {\textbf{says ``got it''} — no reply written yet};
 
-  \draw[arr, hubc] ($(a4.south) + (0,-4.8)$) -- ($(a3.south) + (0,-4.8)$) node[num, pos=0.5]{5};
-  \node[font=\scriptsize, text=inkc, anchor=south]
-    at ($($(a3.south)!0.5!(a4.south)$) + (0,-4.62)$) {\textbf{202 Accepted} — nothing generated yet};
-
-  %% background band marking the async section
   \begin{scope}[on background layer]
-    \fill[texetc!7, rounded corners=6pt]
-      ($(a1.south) + (-1.6,-5.3)$) rectangle ($(a7.south) + (1.6,-13.6)$);
+    \fill[chatc!6, rounded corners=6pt]
+      ($(a1.south) + (-1.8,-5.2)$) rectangle ($(a7.south) + (1.8,-13.1)$);
   \end{scope}
-  \node[font=\scriptsize\bfseries, text=texetc, anchor=west]
-    at ($(a1.south) + (-1.5,-5.65)$) {ASYNCHRONOUS — reply worker, woken by \texttt{NOTIFY}};
+  \node[font=\scriptsize\bfseries, text=chatc, anchor=west]
+    at ($(a1.south) + (-1.7,-5.55)$)
+    {The reply is written in the background, so the participant is never left waiting on a web request};
 
-  \draw[arr] ($(a5.south) + (0,-6.3)$) -- ($(a7.south) + (0,-6.3)$) node[num, pos=0.5]{6};
-  \node[font=\scriptsize, text=inkc, anchor=south]
-    at ($($(a5.south)!0.5!(a7.south)$) + (0,-6.12)$) {claim next reply (\texttt{FOR UPDATE SKIP LOCKED})};
+  \hop{a5}{a7}{-6.2}{6}{takes the next reply off the to-do list}
+  \hopb{a5}{a6}{-7.15}{7}{screens the message for self-harm and sexual content}
+  \hop{a5}{a7}{-8.1}{8}{gathers the wording, today's topic, last week's recap, and this week's conversation}
+  \hopb{a5}{a6}{-9.05}{9}{asks the AI model to write the reply}
 
-  \draw[darr] ($(a5.south) + (0,-7.2)$) -- ($(a6.south) + (0,-7.2)$) node[num, pos=0.5]{7};
-  \node[font=\scriptsize, text=inkc, anchor=south]
-    at ($($(a5.south)!0.5!(a6.south)$) + (0,-7.02)$) {moderate input · self-harm, sexual};
-
-  \draw[arr] ($(a5.south) + (0,-8.1)$) -- ($(a7.south) + (0,-8.1)$) node[num, pos=0.5]{8};
-  \node[font=\scriptsize, text=inkc, anchor=south]
-    at ($($(a5.south)!0.5!(a7.south)$) + (0,-7.92)$) {prompts, daily content, prev-week summary, history (local week)};
-
-  \draw[darr] ($(a5.south) + (0,-9.0)$) -- ($(a6.south) + (0,-9.0)$) node[num, pos=0.5]{9};
-  \node[font=\scriptsize, text=inkc, anchor=south]
-    at ($($(a5.south)!0.5!(a6.south)$) + (0,-8.82)$) {generate · returns text + token usage};
-
-  \node[draw=texetc!50, fill=white, rounded corners=4pt, inner sep=5pt,
+  \node[draw=chatc!45, fill=white, rounded corners=4pt, inner sep=5pt,
         font=\scriptsize, align=left, text=inkc, anchor=north]
-    at ($(a5.south) + (0,-9.5)$)
-    {prune \texttt{[bracketed]} artifacts from the delivered copy;\\
-     store the raw generation unchanged};
+    at ($(a5.south) + (0,-9.55)$)
+    {tidies away anything the model wrote in square brackets\\
+     before it is sent, and keeps the original for the record};
 
-  \draw[arr, texetc] ($(a5.south) + (0,-11.4)$) -- ($(a3.south) + (0,-11.4)$) node[num, pos=0.5]{10};
+  \draw[arr, draw=chatc] ($(a5.south) + (0,-11.3)$) -- ($(a3.south) + (0,-11.3)$)
+    node[num, pos=0.5]{10};
   \node[font=\scriptsize, text=inkc, anchor=south]
-    at ($($(a3.south)!0.5!(a5.south)$) + (0,-11.22)$) {\texttt{POST /api/messages/create} — \emph{before} commit};
+    at ($($(a3.south)!0.5!(a5.south)$) + (0,-11.14)$)
+    {passes the reply back to be sent — \emph{before} marking it done};
 
-  \draw[arr] ($(a5.south) + (0,-12.3)$) -- ($(a7.south) + (0,-12.3)$) node[num, pos=0.5]{11};
-  \node[font=\scriptsize, text=inkc, anchor=south]
-    at ($($(a5.south)!0.5!(a7.south)$) + (0,-12.12)$) {mark \texttt{sent}, store \texttt{texet\_usage}, commit};
+  \hop{a5}{a7}{-12.2}{11}{marks the reply as sent, and records how much the AI model was used}
+  \hop{a3}{a2}{-13.15}{12}{confirms the person is still enrolled, and splits a long reply into parts}
+  \hop{a2}{a1}{-14.1}{13}{delivers the reply}
 
-  \draw[arr] ($(a3.south) + (0,-13.2)$) -- ($(a2.south) + (0,-13.2)$) node[num, pos=0.5]{12};
-  \node[font=\scriptsize, text=inkc, anchor=south]
-    at ($($(a2.south)!0.5!(a3.south)$) + (0,-13.02)$) {check enrolled · split into segments};
-
-  \draw[arr] ($(a2.south) + (0,-14.1)$) -- ($(a1.south) + (0,-14.1)$) node[num, pos=0.5]{13};
-  \node[font=\scriptsize, text=inkc, anchor=south]
-    at ($($(a1.south)!0.5!(a2.south)$) + (0,-13.92)$) {SMS};
-
-  \node[note, anchor=north west]
-    at ($(a1.south) + (-1.6,-15.0)$)
-    {Step 10 precedes step 11 deliberately: the SMS is handed off \emph{before} the commit, so a
-     rejected send rolls the reply back to \texttt{queued} and the worker retries it,\\
-     rather than leaving an utterance marked delivered that never went out. The cost is that a
-     failure \emph{after} hand-off can deliver a duplicate — chosen over silence.};
+  \node[note, anchor=north west] at ($(a1.south) + (-1.8,-14.6)$)
+    {\textbf{Why step 10 comes before step 11.} The reply is handed over to be sent \emph{before} it is
+     marked as done. If sending fails, the reply goes back on the to-do list and is tried again,\\
+     instead of being recorded as delivered when it never arrived. The trade-off is that a failure at
+     exactly the wrong moment can send the same reply twice — judged better than silence.};
 
 \end{tikzpicture}
+
+\vspace{10pt}
+\legend
 \end{center}
 \vfill
 
