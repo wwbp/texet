@@ -11,12 +11,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import (
     DEFAULT_TIMEZONE,
+    MODERATION_VALUES_FOR_BLOCKED,
     UTTERANCE_STATUS_MODERATED,
     UTTERANCE_STATUS_QUEUED,
     UTTERANCE_STATUS_RECEIVED,
     UTTERANCE_STATUS_SENT,
     UTTERANCE_STATUSES,
 )
+from app.models.admin import ModerationSettings
 from app.models.response import (
     Conversation,
     DailyPrompt,
@@ -387,3 +389,20 @@ async def upsert_weekly_summary(
     else:
         session.add(WeeklySummary(user_id=user_id, week_start=week_start, summary=summary))
     await session.flush()
+
+
+MODERATION_SETTINGS_ID = 1
+
+
+async def get_moderation_settings(session: AsyncSession) -> tuple[bool, dict[str, float]]:
+    """Resolve the console-editable moderation config to (email_enabled, thresholds).
+
+    With no row stored the built-in thresholds apply and the alert email is off.
+    Stored thresholds are merged over the built-ins rather than replacing them,
+    so a category the API adds later keeps its default of 1.0 (off).
+    """
+    settings = await session.get(ModerationSettings, MODERATION_SETTINGS_ID)
+    if settings is None:
+        return False, dict(MODERATION_VALUES_FOR_BLOCKED)
+    stored = {name: float(value) for name, value in (settings.thresholds or {}).items()}
+    return settings.email_enabled, {**MODERATION_VALUES_FOR_BLOCKED, **stored}

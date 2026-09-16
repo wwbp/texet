@@ -1,4 +1,4 @@
-from app.models.admin import AdminExport
+from app.models.admin import AdminExport, ModerationSettings
 from app.models.auth import ApiKey
 from app.models.base import Base
 from app.models.response import (
@@ -20,6 +20,7 @@ __all__ = [
     "Conversation",
     "DailyPrompt",
     "InstructionTemplate",
+    "ModerationSettings",
     "PromptIssue",
     "Speaker",
     "SummarizationPrompt",

@@ -52,10 +52,12 @@ async def _seed_queued_replies(
 
 
 def _stub_externals(monkeypatch: pytest.MonkeyPatch, calls: list[str]) -> None:
-    async def _allow_moderation(_utterance: Utterance) -> tuple[bool, str, str, float]:
+    async def _allow_moderation(*_args: object, **_kwargs: object) -> tuple[bool, str, str, float]:
         return False, "", "", 0.0
 
-    async def _allow_text_moderation(_text: str) -> tuple[bool, str, str, float]:
+    async def _allow_text_moderation(
+        *_args: object, **_kwargs: object
+    ) -> tuple[bool, str, str, float]:
         return False, "", "", 0.0
 
     async def _fake_generate_reply(
