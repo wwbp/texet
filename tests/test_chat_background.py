@@ -495,8 +495,8 @@ async def test_moderate_message_blocks_when_score_exceeds_threshold(
 async def test_moderate_message_allows_when_score_equals_threshold(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    threshold = MODERATION_VALUES_FOR_BLOCKED["sexual"]
-    _stub_moderation_openai(monkeypatch, {"sexual": threshold})
+    threshold = MODERATION_VALUES_FOR_BLOCKED["sexual/minors"]
+    _stub_moderation_openai(monkeypatch, {"sexual/minors": threshold})
     utterance = Utterance(conversation_id="c-mod-3", speaker_id="u-mod-3", text="sample input")
 
     blocked, reason, category, score = await response_service._moderate_message(utterance)
@@ -703,18 +703,18 @@ async def test_initial_bot_message_included_in_history_not_prompt(
 
 
 # ---------------------------------------------------------------------------
-# Moderation scope: self-harm and sexual only
+# Moderation scope: self-harm, plus sexual content involving minors
 # ---------------------------------------------------------------------------
 
 _ACTIVE_CATEGORIES = [
     "self-harm",
     "self-harm/instructions",
     "self-harm/intent",
-    "sexual",
     "sexual/minors",
 ]
 
 _DISABLED_CATEGORIES = [
+    "sexual",
     "harassment",
     "harassment/threatening",
     "hate",
@@ -726,10 +726,10 @@ _DISABLED_CATEGORIES = [
 
 @pytest.mark.parametrize("category", _ACTIVE_CATEGORIES)
 @pytest.mark.asyncio
-async def test_self_harm_and_sexual_still_block(
+async def test_enforced_categories_still_block(
     category: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The two families the study actually moderates for."""
+    """The categories the study actually moderates for."""
     threshold = MODERATION_VALUES_FOR_BLOCKED[category]
     assert threshold < 1.0, f"{category} must stay enforceable"
 

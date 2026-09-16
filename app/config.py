@@ -256,7 +256,7 @@ CONSOLE_PREFIX: Final[str] = "/console"
 
 # Score above which a message is withheld, per moderation category.
 #
-# The study moderates for two families only: self-harm and sexual content. The
+# The study moderates for self-harm, plus sexual content involving minors. The
 # rest are pinned to 1.0, which is an off switch rather than a high bar — the
 # comparison is a strict '>' and moderation scores are bounded at 1.0, so no
 # score clears it. That is the same value already applied to any category the
@@ -270,9 +270,9 @@ MODERATION_VALUES_FOR_BLOCKED = {
     "self-harm": 0.2,
     "self-harm/instructions": 0.5,
     "self-harm/intent": 0.7,
-    "sexual": 0.5,
     "sexual/minors": 0.2,
     # Not enforced.
+    "sexual": 1.0,
     "harassment": 1.0,
     "harassment/threatening": 1.0,
     "hate": 1.0,
