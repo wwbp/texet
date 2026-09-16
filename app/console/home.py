@@ -107,6 +107,11 @@ async def console_root(_: None = Depends(require_admin)) -> HTMLResponse:
               <h2>Weekly Summaries</h2>
               <p>Force a summary run for every participant in a chosen week.</p>
             </a>
+            <a class="card" href="{CONSOLE_PREFIX}/moderation">
+              <span>Operations</span>
+              <h2>Moderation</h2>
+              <p>Per-category thresholds, and whether a withheld message raises an email.</p>
+            </a>
             <a class="card" href="{CONSOLE_PREFIX}/failures">
               <span>Operations</span>
               <h2>Failures</h2>

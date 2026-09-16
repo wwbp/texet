@@ -33,7 +33,7 @@ def _stub_pass_through(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
     """Stubs out all external calls so _run_deferred_reply succeeds cleanly."""
     captured: dict[str, object] = {}
 
-    async def _allow(_utterance: object) -> tuple[bool, str, str, float]:
+    async def _allow(*_args: object, **_kwargs: object) -> tuple[bool, str, str, float]:
         return False, "", "", 0.0
 
     async def _fake_generate(

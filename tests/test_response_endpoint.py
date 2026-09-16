@@ -22,6 +22,7 @@ from app.config import (
 from app.db import get_async_session
 from app.engines.bedrock import _FIRST_TURN_PLACEHOLDER, BedrockCompletion, BedrockEngine
 from app.main import app
+from app.models.admin import ModerationSettings
 from app.models.auth import ApiKey
 from app.models.response import Conversation, Speaker, Utterance
 from app.response import service as response_service
@@ -131,7 +132,7 @@ def kani_stub(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
 
 @pytest.fixture(autouse=True)
 def moderation_stub(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def _allow_moderation(_utterance: object) -> tuple[bool, str, str, float]:
+    async def _allow_moderation(*_args: object, **_kwargs: object) -> tuple[bool, str, str, float]:
         return False, "", "", 0.0
 
     monkeypatch.setattr(response_service, "_moderate_message", _allow_moderation)
@@ -139,7 +140,9 @@ def moderation_stub(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture(autouse=True)
 def outbound_moderation_stub(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def _allow_text_moderation(_text: str) -> tuple[bool, str, str, float]:
+    async def _allow_text_moderation(
+        *_args: object, **_kwargs: object
+    ) -> tuple[bool, str, str, float]:
         return False, "", "", 0.0
 
     monkeypatch.setattr(response_service, "_moderate_text", _allow_text_moderation)
@@ -159,6 +162,7 @@ def moderation_email_outbox(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, o
         blocked_category: str,
         blocked_score: float,
         recent_chat_history: list[object],
+        email_enabled: bool,
     ) -> None:
         outbox.append(
             {
@@ -171,6 +175,7 @@ def moderation_email_outbox(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, o
                 "blocked_category": blocked_category,
                 "blocked_score": blocked_score,
                 "recent_chat_history": recent_chat_history,
+                "email_enabled": email_enabled,
             }
         )
 
@@ -497,10 +502,13 @@ async def test_response_sends_moderation_email_when_blocked(
     moderation_email_outbox: list[dict[str, object]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def _block_moderation(_utterance: object) -> tuple[bool, str, str, float]:
+    async def _block_moderation(*_args: object, **_kwargs: object) -> tuple[bool, str, str, float]:
         return True, "Blocked due to violence content with score 0.91.", "violence", 0.91
 
     monkeypatch.setattr(response_service, "_moderate_message", _block_moderation)
+
+    async with async_session.begin():
+        async_session.add(ModerationSettings(id=1, email_enabled=True))
 
     response = await async_client.post(
         "/response",
@@ -526,6 +534,7 @@ async def test_response_sends_moderation_email_when_blocked(
     assert email["blocked_category"] == "violence"
     assert email["blocked_score"] == pytest.approx(0.91)
     assert email["utterance_text"] == "blocked message"
+    assert email["email_enabled"] is True
 
     async_session.expire_all()
     user_result = await async_session.execute(
@@ -551,7 +560,7 @@ async def test_response_does_not_fail_if_moderation_email_errors(
     sms_outbox: list[dict[str, str]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def _block_moderation(_utterance: object) -> tuple[bool, str, str, float]:
+    async def _block_moderation(*_args: object, **_kwargs: object) -> tuple[bool, str, str, float]:
         return True, "Blocked due to harassment content with score 0.73.", "harassment", 0.73
 
     async def _fail_send_moderation_email(
@@ -610,7 +619,9 @@ async def test_response_moderates_generated_reply_and_persists_raw_output(
     ) -> str:
         return raw_reply
 
-    async def _block_generated_reply(text: str) -> tuple[bool, str, str, float]:
+    async def _block_generated_reply(
+        text: str, _thresholds: dict[str, float]
+    ) -> tuple[bool, str, str, float]:
         assert text == raw_reply
         return True, "Blocked due to violence content with score 0.91.", "violence", 0.91
 
@@ -1215,7 +1226,7 @@ async def test_moderation_notice_is_not_pruned(
 ) -> None:
     """The notice is our own copy, not model output; pruning must not touch it."""
 
-    async def _blocked(_text: str) -> tuple[bool, str, str, float]:
+    async def _blocked(*_args: object, **_kwargs: object) -> tuple[bool, str, str, float]:
         return True, "", "self-harm", 0.91
 
     monkeypatch.setattr(response_service, "_moderate_text", _blocked)

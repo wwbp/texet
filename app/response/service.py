@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.config import (
     BEDROCK_DEFAULT_MODEL,
     DEFAULT_LLM_PROVIDER,
-    MODERATION_VALUES_FOR_BLOCKED,
     UTTERANCE_STATUS_FAILED,
     UTTERANCE_STATUS_MODERATED,
     UTTERANCE_STATUS_QUEUED,
@@ -51,6 +50,7 @@ from app.response.crud import (
     get_daily_prompt,
     get_instruction_template,
     get_latest_system_prompt,
+    get_moderation_settings,
     get_or_create_bot_speaker,
     get_or_create_conversation,
     get_or_create_speaker,
@@ -223,7 +223,9 @@ async def _close_async_openai_client(client: AsyncOpenAI) -> None:
         await maybe_awaitable
 
 
-async def _moderate_text(text: str) -> tuple[bool, str, str, float]:
+async def _moderate_text(
+    text: str, thresholds: dict[str, float]
+) -> tuple[bool, str, str, float]:
     if mock_external_apis():
         await asyncio.sleep(get_mock_moderation_latency_ms() / 1000)
         return False, "", "", 0.0
@@ -255,16 +257,18 @@ async def _moderate_text(text: str) -> tuple[bool, str, str, float]:
 
     # moderation score represents tolerance
     for category, score in category_scores.items():
-        if score > MODERATION_VALUES_FOR_BLOCKED.get(category, 1.0):
+        if score > thresholds.get(category, 1.0):
             blocked_status = f"Blocked due to {category} content with score {score:.2f}."
             return True, blocked_status.strip(), category, float(score)
     return False, "", "", 0.0
 
 
-async def _moderate_message(utterance: Utterance) -> tuple[bool, str, str, float]:
+async def _moderate_message(
+    utterance: Utterance, thresholds: dict[str, float]
+) -> tuple[bool, str, str, float]:
     if utterance.text is None:
         raise RuntimeError("Utterance text is not set.")
-    return await _moderate_text(utterance.text)
+    return await _moderate_text(utterance.text, thresholds)
 
 
 def _build_moderation_email(
@@ -379,7 +383,11 @@ async def _send_moderation_email(
     blocked_category: str,
     blocked_score: float,
     recent_chat_history: list[ChatMessage],
+    email_enabled: bool,
 ) -> None:
+    if not email_enabled:
+        return
+
     recipients = get_moderation_alert_emails()
     if not recipients:
         return
@@ -545,6 +553,7 @@ async def _process_queued_reply(
     # connection is held during the moderation/LLM calls below — connection
     # demand scales with pool_size / hold_seconds (see docs/load-testing.md).
     async with sessionmaker() as session:
+        email_enabled, thresholds = await get_moderation_settings(session)
         prev_summary = await get_weekly_summary(session, user_id, prev_week_start)
         sp = await get_latest_system_prompt(session)
         base_prompt = await get_or_create_system_prompt(session)
@@ -585,7 +594,9 @@ async def _process_queued_reply(
     model_id = sp.model_id if sp else BEDROCK_DEFAULT_MODEL
     daily_content = daily_prompt.content if daily_prompt else None
 
-    blocked, _, blocked_category, blocked_score = await _moderate_message(user_utterance)
+    blocked, _, blocked_category, blocked_score = await _moderate_message(
+        user_utterance, thresholds
+    )
     if blocked:
         moderation_notice = _moderation_notice("user", blocked_category, blocked_score)
         async with sessionmaker() as session:
@@ -606,6 +617,7 @@ async def _process_queued_reply(
                 blocked_category=blocked_category,
                 blocked_score=blocked_score,
                 recent_chat_history=blocked_history[-5:],
+                email_enabled=email_enabled,
             )
         except Exception:
             _logger.warning(
@@ -676,7 +688,9 @@ async def _process_queued_reply(
         # this takes the generation-failure path and is retried.
         raise RuntimeError("Reply contained nothing but bracketed segments.")
 
-    reply_blocked, _, blocked_category, blocked_score = await _moderate_text(reply_text)
+    reply_blocked, _, blocked_category, blocked_score = await _moderate_text(
+        reply_text, thresholds
+    )
     if reply_blocked:
         moderation_notice = _moderation_notice("bot", blocked_category, blocked_score)
         async with sessionmaker() as session:

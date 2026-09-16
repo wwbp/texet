@@ -4,6 +4,7 @@ import asyncio
 import os
 from dataclasses import dataclass
 
+from app.config import MODERATION_VALUES_FOR_BLOCKED
 from app.models.response import Utterance
 from app.response import service as response_service
 
@@ -55,7 +56,9 @@ async def _run_smoke() -> int:
     failures: list[str] = []
     for index, case in enumerate(CASES, start=1):
         utterance = _build_utterance(case, index)
-        blocked, reason, category, score = await response_service._moderate_message(utterance)
+        blocked, reason, category, score = await response_service._moderate_message(
+            utterance, MODERATION_VALUES_FOR_BLOCKED
+        )
         self_harm_detected = blocked and category.startswith("self-harm")
 
         print(
