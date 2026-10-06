@@ -118,7 +118,10 @@ def _merge_meta(
 def _moderation_notice(source: str, category: str, score: float) -> str:
     if source == "bot":
         return f"A generated reply was moderated due to {category} content with score {score:.2f}."
-    return "I can't personally help with that, but your safety matters, and support is available. Call the crisis line at 988 to talk to someone."
+    return (
+        "I can't personally help with that, but your safety matters, and support is "
+        "available. Call the crisis line at 988 to talk to someone."
+    )
 
 
 async def _generate_reply(
@@ -297,7 +300,10 @@ def _build_moderation_email(
 
     utterance_html = _esc(utterance_text)
     ts = utterance_timestamp
-    timestamp_str = f"{ts.strftime('%b')} {ts.day}, {ts.year} {ts.hour:02d}:{ts.minute:02d} {ts.strftime('%Z') or 'UTC'}"
+    timestamp_str = (
+        f"{ts.strftime('%b')} {ts.day}, {ts.year} "
+        f"{ts.hour:02d}:{ts.minute:02d} {ts.strftime('%Z') or 'UTC'}"
+    )
     admin_prefix = f"{admin_base_url.rstrip('/')}/console/admin" if admin_base_url else None
 
     links_html = ""
@@ -310,14 +316,18 @@ def _build_moderation_email(
             <tr><td style="color:#888;">Conversation</td><td><a href="{admin_prefix}/conversation/details/{conversation_id}" style="color:#2980b9;">{conversation_id}</a></td></tr>
             <tr><td style="color:#888;">Speaker</td><td><a href="{admin_prefix}/speaker/details/{speaker_id}" style="color:#2980b9;">{speaker_id}</a></td></tr>
           </table>
-        </td></tr>"""
+        </td></tr>"""  # noqa: E501
 
     history_rows = ""
     for msg in recent_chat_history:
         role = msg.role.value
         text = _esc(str(msg.content).replace("\n", " ").strip())
         label_color = "#2c3e50" if role == "user" else "#7f8c8d"
-        history_rows += f'<tr><td style="color:{label_color};font-weight:600;width:40px;vertical-align:top;padding:3px 8px 3px 0;">{role}</td><td style="color:#333;padding:3px 0;">{text}</td></tr>'
+        history_rows += (
+            f'<tr><td style="color:{label_color};font-weight:600;width:40px;'
+            f'vertical-align:top;padding:3px 8px 3px 0;">{role}</td>'
+            f'<td style="color:#333;padding:3px 0;">{text}</td></tr>'
+        )
 
     history_html = ""
     if history_rows:
@@ -325,7 +335,7 @@ def _build_moderation_email(
         <tr><td style="padding:16px 0 8px;border-top:1px solid #e0e0e0;">
           <p style="margin:0 0 8px;font-size:13px;font-weight:600;color:#555;text-transform:uppercase;letter-spacing:.05em;">Recent context</p>
           <table cellpadding="0" cellspacing="0" style="font-size:13px;width:100%;">{history_rows}</table>
-        </td></tr>"""
+        </td></tr>"""  # noqa: E501
 
     body = f"""<!DOCTYPE html>
 <html><body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,sans-serif;">
@@ -367,7 +377,7 @@ def _build_moderation_email(
 
 </table>
 </td></tr></table>
-</body></html>"""
+</body></html>"""  # noqa: E501
 
     subject = f"[texet] {blocked_category} ({score_pct}%) — {user_id}"
     return subject, body

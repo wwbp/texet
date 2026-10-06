@@ -120,7 +120,8 @@ async def console_root(_: None = Depends(require_admin)) -> HTMLResponse:
             <a class="card" href="{CONSOLE_PREFIX}/engagement">
               <span>Data</span>
               <h2>Engagement</h2>
-              <p>Who replied on the days the chatbot pinged them, with utterance and token counts.</p>
+              <p>Who replied on the days the chatbot pinged them,
+                with utterance and token counts.</p>
             </a>
             <a class="card" href="{CONSOLE_PREFIX}/exports">
               <span>Data</span>
