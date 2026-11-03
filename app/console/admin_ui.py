@@ -112,8 +112,8 @@ class SpeakerAdmin(ModelView, model=Speaker):
     column_searchable_list = ["id"]
     column_sortable_list = [Speaker.created_at]
     column_default_sort = (Speaker.created_at, True)
-    column_formatters = {"created_at": _fmt_dt}
-    column_formatters_detail = {"meta": _fmt_meta_detail}
+    column_formatters = {"created_at": _fmt_dt}  # type: ignore[dict-item]
+    column_formatters_detail = {"meta": _fmt_meta_detail}  # type: ignore[dict-item]
     column_labels = {"id": "Speaker ID", "created_at": "Joined"}
 
 
@@ -149,13 +149,13 @@ class ConversationAdmin(ModelView, model=Conversation):
         OperationColumnFilter(Conversation.owner_speaker_id, title="User ID"),
     ]
     column_formatters = {
-        "last_activity_at": _fmt_dt,
-        "created_at": _fmt_dt,
+        "last_activity_at": _fmt_dt,  # type: ignore[dict-item]
+        "created_at": _fmt_dt,  # type: ignore[dict-item]
     }
     column_formatters_detail = {
-        "last_activity_at": _fmt_dt,
-        "created_at": _fmt_dt,
-        "meta": _fmt_meta_detail,
+        "last_activity_at": _fmt_dt,  # type: ignore[dict-item]
+        "created_at": _fmt_dt,  # type: ignore[dict-item]
+        "meta": _fmt_meta_detail,  # type: ignore[dict-item]
     }
     column_labels = {
         "id": "Conversation ID",
@@ -186,7 +186,7 @@ class WeeklySummaryAdmin(ModelView, model=WeeklySummary):
         OperationColumnFilter(WeeklySummary.user_id, title="User ID"),
         OperationColumnFilter(WeeklySummary.week_start, title="Week Start"),
     ]
-    column_formatters = {"summary": _fmt_text_truncated}
+    column_formatters = {"summary": _fmt_text_truncated}  # type: ignore[dict-item]
     column_labels = {
         "id": "Summary ID",
         "user_id": "User",
@@ -239,14 +239,14 @@ class UtteranceAdmin(ModelView, model=Utterance):
         ),
     ]
     column_formatters = {
-        "timestamp": _fmt_dt,
-        "created_at": _fmt_dt,
-        "text": _fmt_text_truncated,
+        "timestamp": _fmt_dt,  # type: ignore[dict-item]
+        "created_at": _fmt_dt,  # type: ignore[dict-item]
+        "text": _fmt_text_truncated,  # type: ignore[dict-item]
     }
     column_formatters_detail = {
-        "timestamp": _fmt_dt,
-        "created_at": _fmt_dt,
-        "meta": _fmt_meta_detail,
+        "timestamp": _fmt_dt,  # type: ignore[dict-item]
+        "created_at": _fmt_dt,  # type: ignore[dict-item]
+        "meta": _fmt_meta_detail,  # type: ignore[dict-item]
     }
     column_labels = {
         "id": "Utterance ID",
@@ -327,7 +327,7 @@ class AdminExportAdmin(ModelView, model=AdminExport):
         "completed_at",
         "meta",
     ]
-    column_formatters_detail = {"meta": _fmt_meta_detail}
+    column_formatters_detail = {"meta": _fmt_meta_detail}  # type: ignore[dict-item]
     column_labels = {
         "id": "Export ID",
         "range_start": "Start",
