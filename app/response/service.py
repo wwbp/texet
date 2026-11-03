@@ -48,16 +48,16 @@ from app.response.crud import (
     create_queued_utterance,
     create_utterance,
     get_daily_prompt,
-    get_instruction_template,
+    get_latest_instruction_template,
     get_latest_system_prompt,
     get_moderation_settings,
     get_or_create_bot_speaker,
     get_or_create_conversation,
     get_or_create_speaker,
     get_or_create_system_prompt,
-    get_weekly_summary,
+    get_weekly_summary_row,
 )
-from app.response.prompt import compose_instruction_prompt
+from app.response.prompt import DEFAULT_INSTRUCTION_TEMPLATE, compose_instruction_prompt
 from app.response.schemas import (
     ChatQueuedResponse,
     ChatRequest,
@@ -66,6 +66,7 @@ from app.response.schemas import (
 )
 from app.response.utils import (
     extract_utc_offset,
+    prompt_sha256,
     strip_bracketed_segments,
     week_bounds_utc,
     week_start_for,
@@ -113,6 +114,40 @@ def _merge_meta(
         merged.update(base)
     merged.update(updates)
     return merged
+
+
+def _provenance_meta(
+    *,
+    provider: str,
+    model_id: str,
+    system_prompt_id: str | None,
+    instruction_template_id: str | None,
+    daily_prompt_id: str | None,
+    daily_prompt_missing: bool,
+    weekly_summary_id: str | None,
+    week_start: datetime.date,
+    day_number: int | None,
+    system_prompt: str,
+) -> dict[str, Any]:
+    """Flat record of the config that produced a bot reply.
+
+    Config rows are edited in place in the console, so an id does not pin the
+    text. The sha256 of the composed prompt does; the ids are hints.
+    """
+    meta: dict[str, Any] = {
+        "texet_provider": provider,
+        "texet_model_id": model_id,
+        "texet_system_prompt_id": system_prompt_id,
+        "texet_instruction_template_id": instruction_template_id,
+        "texet_daily_prompt_id": daily_prompt_id,
+        "texet_weekly_summary_id": weekly_summary_id,
+        "texet_week_start": week_start.isoformat(),
+        "texet_day_number": day_number,
+        "texet_system_prompt_sha256": prompt_sha256(system_prompt),
+    }
+    if daily_prompt_missing:
+        meta["texet_daily_prompt_missing"] = True
+    return meta
 
 
 def _moderation_notice(source: str, category: str, score: float) -> str:
@@ -226,9 +261,7 @@ async def _close_async_openai_client(client: AsyncOpenAI) -> None:
         await maybe_awaitable
 
 
-async def _moderate_text(
-    text: str, thresholds: dict[str, float]
-) -> tuple[bool, str, str, float]:
+async def _moderate_text(text: str, thresholds: dict[str, float]) -> tuple[bool, str, str, float]:
     if mock_external_apis():
         await asyncio.sleep(get_mock_moderation_latency_ms() / 1000)
         return False, "", "", 0.0
@@ -463,6 +496,7 @@ async def _persist_and_send_bot_reply(
     bot_utterance.error = None
     bot_utterance.status = final_status
     bot_utterance.meta = _merge_meta(bot_utterance.meta, meta_updates)
+    bot_utterance.sent_at = datetime.datetime.now(datetime.UTC)
 
     # Send SMS before committing so a delivery failure triggers rollback via
     # _mark_bot_utterance_failed, leaving the utterance in its original queued
@@ -564,10 +598,10 @@ async def _process_queued_reply(
     # demand scales with pool_size / hold_seconds (see docs/load-testing.md).
     async with sessionmaker() as session:
         email_enabled, thresholds = await get_moderation_settings(session)
-        prev_summary = await get_weekly_summary(session, user_id, prev_week_start)
+        prev_summary_row = await get_weekly_summary_row(session, user_id, prev_week_start)
         sp = await get_latest_system_prompt(session)
         base_prompt = await get_or_create_system_prompt(session)
-        instruction_template = await get_instruction_template(session)
+        template_row = await get_latest_instruction_template(session)
         daily_prompt = (
             await get_daily_prompt(session, day_number) if day_number is not None else None
         )
@@ -603,6 +637,31 @@ async def _process_queued_reply(
     provider = sp.provider if sp else DEFAULT_LLM_PROVIDER
     model_id = sp.model_id if sp else BEDROCK_DEFAULT_MODEL
     daily_content = daily_prompt.content if daily_prompt else None
+    prev_summary = prev_summary_row.summary if prev_summary_row else None
+    # Same fallback rule as crud.get_instruction_template, without a second query.
+    template_text = template_row.template.strip() if template_row else ""
+    instruction_template = template_text or DEFAULT_INSTRUCTION_TEMPLATE
+
+    system_prompt = compose_instruction_prompt(
+        base=base_prompt,
+        daily_content=daily_content,
+        weekly_summary=prev_summary,
+        user_local_time=user_local_time,
+        day_number=day_number,
+        template=instruction_template,
+    )
+    provenance = _provenance_meta(
+        provider=provider,
+        model_id=model_id,
+        system_prompt_id=sp.id if sp and sp.prompt.strip() else None,
+        instruction_template_id=template_row.id if template_text and template_row else None,
+        daily_prompt_id=daily_prompt.id if daily_prompt else None,
+        daily_prompt_missing=day_number is not None and daily_prompt is None,
+        weekly_summary_id=prev_summary_row.id if prev_summary_row else None,
+        week_start=current_week_start,
+        day_number=day_number,
+        system_prompt=system_prompt,
+    )
 
     blocked, _, blocked_category, blocked_score = await _moderate_message(
         user_utterance, thresholds
@@ -653,18 +712,9 @@ async def _process_queued_reply(
                 delivered_text=moderation_notice,
                 final_status=UTTERANCE_STATUS_MODERATED,
                 in_reply_to_utterance_id=user_utterance.id,
-                meta_updates=moderation_meta,
+                meta_updates=_merge_meta(moderation_meta, provenance),
             )
         return
-
-    system_prompt = compose_instruction_prompt(
-        base=base_prompt,
-        daily_content=daily_content,
-        weekly_summary=prev_summary,
-        user_local_time=user_local_time,
-        day_number=day_number,
-        template=instruction_template,
-    )
 
     generation_snapshot = _build_generation_snapshot(
         chat_history,
@@ -698,9 +748,7 @@ async def _process_queued_reply(
         # this takes the generation-failure path and is retried.
         raise RuntimeError("Reply contained nothing but bracketed segments.")
 
-    reply_blocked, _, blocked_category, blocked_score = await _moderate_text(
-        reply_text, thresholds
-    )
+    reply_blocked, _, blocked_category, blocked_score = await _moderate_text(reply_text, thresholds)
     if reply_blocked:
         moderation_notice = _moderation_notice("bot", blocked_category, blocked_score)
         async with sessionmaker() as session:
@@ -713,6 +761,7 @@ async def _process_queued_reply(
                 final_status=UTTERANCE_STATUS_MODERATED,
                 in_reply_to_utterance_id=user_utterance.id,
                 meta_updates={
+                    **provenance,
                     "texet_generation": generation_snapshot,
                     "texet_moderation_source": "bot",
                     "texet_moderation_category": blocked_category,
@@ -732,7 +781,7 @@ async def _process_queued_reply(
             final_status=UTTERANCE_STATUS_SENT,
             in_reply_to_utterance_id=user_utterance.id,
             meta_updates=_merge_meta(
-                {"texet_generation": generation_snapshot},
+                {**provenance, "texet_generation": generation_snapshot},
                 {"texet_usage": usage} if usage else None,
             ),
         )

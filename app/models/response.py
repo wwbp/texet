@@ -107,6 +107,11 @@ class Utterance(Base):
         DateTime(timezone=True), nullable=True
     )
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    # When TexET handed the reply to the SMS service. Null for rows from before
+    # the column existed and for hub-sent initial messages.
+    sent_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     text: Mapped[str | None] = mapped_column(Text, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     meta: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)

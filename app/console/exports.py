@@ -13,7 +13,7 @@ from typing import Any
 
 from fastapi import BackgroundTasks, Depends, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
-from sqlalchemy import select
+from sqlalchemy import func, inspect, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
 
@@ -27,10 +27,80 @@ from app.console.core import (
     require_admin,
 )
 from app.db import get_async_session
-from app.models.admin import AdminExport
-from app.models.response import Conversation, Speaker, Utterance
+from app.models.admin import AdminExport, ModerationSettings
+from app.models.base import Base
+from app.models.response import (
+    Conversation,
+    DailyPrompt,
+    InstructionTemplate,
+    PromptIssue,
+    Speaker,
+    SummarizationPrompt,
+    SystemPrompt,
+    Utterance,
+    WeeklySummary,
+)
+from app.response.crud import BOT_SPEAKER_PREFIX
+from app.response.service import PROMPT_ISSUE_DAILY_PROMPT_MISSING
+from app.response.utils import prompt_sha256
 
 CORPUS_PREFIX = "texet_convokit"
+EXPORT_VERSION = 2
+CONFIG_FILE = "texet_config.json"
+# Bulky snapshot fields: chat_history repeats the whole week on every reply,
+# so keeping it makes the export grow quadratically.
+SLIM_GENERATION_KEYS = ("system_prompt", "chat_history")
+_GIT_COMMIT_FILE = Path(__file__).resolve().parents[1] / "GIT_COMMIT"
+
+# Where each model column goes. "table.*" means every column of the table is
+# written by _row_dict, so new columns there are exported automatically.
+# tests/test_export_columns.py fails on any column missing from both maps.
+EXPORTED: dict[str, str] = {
+    "speakers.id": "speakers.json key; utterance speaker",
+    "speakers.meta": "speakers.json meta",
+    "speakers.created_at": "speakers.json texet_created_at",
+    "conversations.id": "conversations.json texet_conversation_id",
+    "conversations.owner_speaker_id": "conversations.json texet_owner_speaker_id",
+    "conversations.status": "conversations.json texet_status",
+    "conversations.last_activity_at": "conversations.json texet_last_activity_at",
+    "conversations.meta": "conversations.json meta",
+    "conversations.created_at": "conversations.json texet_created_at",
+    "utterances.id": "utterances.jsonl id",
+    "utterances.conversation_id": "utterances.jsonl conversation_id (first utterance id)",
+    "utterances.speaker_id": "utterances.jsonl speaker",
+    "utterances.reply_to_id": "utterances.jsonl reply_to, or texet_reply_to_missing",
+    "utterances.timestamp": "utterances.jsonl timestamp (epoch seconds)",
+    "utterances.status": "utterance meta texet_status",
+    "utterances.claimed_at": "utterance meta texet_claimed_at",
+    "utterances.attempts": "utterance meta texet_attempts",
+    "utterances.sent_at": "utterance meta texet_sent_at",
+    "utterances.text": "utterances.jsonl text",
+    "utterances.error": "utterance meta texet_error",
+    "utterances.meta": "utterances.jsonl meta (generation snapshot slimmed by default)",
+    "utterances.created_at": "utterance meta texet_created_at",
+    "weekly_summaries.id": "conversations.json texet_weekly_summaries[].id",
+    "weekly_summaries.user_id": "implied: the conversation owner",
+    "weekly_summaries.week_start": "conversations.json texet_weekly_summaries[].week_start",
+    "weekly_summaries.summary": "conversations.json texet_weekly_summaries[].summary",
+    "weekly_summaries.created_at": "conversations.json texet_weekly_summaries[].created_at",
+    "system_prompts.*": f"{CONFIG_FILE} system_prompts",
+    "instruction_templates.*": f"{CONFIG_FILE} instruction_templates",
+    "summarization_prompts.*": f"{CONFIG_FILE} summarization_prompts",
+    "daily_prompts.*": f"{CONFIG_FILE} daily_prompts",
+    "moderation_settings.*": f"{CONFIG_FILE} moderation_settings",
+    "prompt_issues.*": f"{CONFIG_FILE} prompt_issues",
+}
+
+EXPORT_EXCLUDED: dict[str, str] = {
+    "api_keys.id": "credential metadata, not study data",
+    "api_keys.name": "credential metadata, not study data",
+    "api_keys.key_hash": "secret",
+    "api_keys.key_prefix": "partial secret",
+    "api_keys.is_active": "credential metadata, not study data",
+    "api_keys.last_used_at": "credential metadata, not study data",
+    "api_keys.created_at": "credential metadata, not study data",
+    "admin_exports.*": "the export audit log itself, not study data",
+}
 
 
 @dataclass(frozen=True)
@@ -95,6 +165,139 @@ def _meta_index(metas: Iterable[dict[str, Any]]) -> dict[str, str]:
     return index
 
 
+def slim_generation(meta: dict[str, Any], *, include_generation_snapshot: bool) -> dict[str, Any]:
+    """Add the composed-prompt hash; drop the bulky snapshot fields unless asked."""
+    generation = meta.get("texet_generation")
+    if not isinstance(generation, dict):
+        return meta
+    out = dict(meta)
+    prompt = generation.get("system_prompt")
+    if isinstance(prompt, str):
+        out.setdefault("texet_system_prompt_sha256", prompt_sha256(prompt))
+    if not include_generation_snapshot:
+        out["texet_generation"] = {
+            k: v for k, v in generation.items() if k not in SLIM_GENERATION_KEYS
+        }
+    return out
+
+
+def infer_provenance(
+    meta: dict[str, Any],
+    *,
+    timestamp: datetime.datetime,
+    owner_id: str,
+    reply_to_id: str | None,
+    daily_prompts: dict[int, DailyPrompt],
+    summaries: dict[tuple[str, datetime.date], tuple[str, datetime.datetime]],
+    daily_missing_for: set[str],
+) -> dict[str, Any]:
+    """Provenance for bot replies stored before replies recorded it.
+
+    System-prompt and template ids stay None: the console edits those rows in
+    place, so "latest row by created_at" can name text that never ran. Daily
+    prompt and weekly summary are matched only when the row already existed.
+    """
+    generation = meta.get("texet_generation")
+    if not isinstance(generation, dict) or "texet_model_id" in meta:
+        return {}
+
+    def existed(created_at: datetime.datetime) -> bool:
+        return _ensure_tz(created_at) <= _ensure_tz(timestamp)
+
+    day_number = generation.get("day_number")
+    daily = daily_prompts.get(day_number) if isinstance(day_number, int) else None
+    week_start = generation.get("week_start")
+    summary = None
+    if isinstance(week_start, str):
+        # The prompt injects the previous week's summary.
+        previous = datetime.date.fromisoformat(week_start) - datetime.timedelta(days=7)
+        summary = summaries.get((owner_id, previous))
+
+    inferred: dict[str, Any] = {
+        "texet_provider": generation.get("provider"),
+        "texet_model_id": generation.get("model_id"),
+        "texet_system_prompt_id": None,
+        "texet_instruction_template_id": None,
+        "texet_daily_prompt_id": daily.id if daily and existed(daily.created_at) else None,
+        "texet_weekly_summary_id": summary[0] if summary and existed(summary[1]) else None,
+        "texet_week_start": week_start,
+        "texet_day_number": day_number,
+        "texet_config_inferred": True,
+    }
+    if reply_to_id in daily_missing_for:
+        inferred["texet_daily_prompt_missing"] = True
+    return inferred
+
+
+def _jsonable(value: Any) -> Any:
+    if isinstance(value, datetime.datetime):
+        return _iso(value)
+    if isinstance(value, datetime.date):
+        return value.isoformat()
+    return value
+
+
+def _row_dict(row: Base) -> dict[str, Any]:
+    return {
+        attr.key: _jsonable(getattr(row, attr.key)) for attr in inspect(row).mapper.column_attrs
+    }
+
+
+def _git_commit() -> str | None:
+    # git archive (the EB deploy package) fills this in via export-subst.
+    try:
+        value = _GIT_COMMIT_FILE.read_text().strip()
+    except OSError:
+        return None
+    return None if not value or value.startswith("$Format") else value
+
+
+async def _all(session: AsyncSession, model: type[Base], *order: Any) -> list[Any]:
+    return list((await session.execute(select(model).order_by(*order))).scalars().all())
+
+
+async def _build_config(
+    session: AsyncSession,
+) -> tuple[dict[str, Any], list[DailyPrompt], set[str]]:
+    daily_prompts = await _all(session, DailyPrompt, DailyPrompt.day_number)
+    issues = await _all(session, PromptIssue, PromptIssue.created_at, PromptIssue.id)
+    moderation = await session.get(ModerationSettings, 1)
+    config = {
+        "export_version": EXPORT_VERSION,
+        "note": (
+            "The console edits these rows in place and can delete them, so the text here is "
+            "the current value, not always the text that produced an older reply. Compare "
+            "replies by utterance meta texet_system_prompt_sha256."
+        ),
+        "system_prompts": [
+            _row_dict(r)
+            for r in await _all(session, SystemPrompt, SystemPrompt.created_at, SystemPrompt.id)
+        ],
+        "instruction_templates": [
+            _row_dict(r)
+            for r in await _all(
+                session, InstructionTemplate, InstructionTemplate.created_at, InstructionTemplate.id
+            )
+        ],
+        "summarization_prompts": [
+            _row_dict(r)
+            for r in await _all(
+                session, SummarizationPrompt, SummarizationPrompt.created_at, SummarizationPrompt.id
+            )
+        ],
+        "daily_prompts": [_row_dict(r) for r in daily_prompts],
+        "moderation_settings": _row_dict(moderation) if moderation else None,
+        "moderation_settings_note": "Current row only. TexET does not store the history.",
+        "prompt_issues": [_row_dict(r) for r in issues],
+    }
+    missing = {
+        i.utterance_id
+        for i in issues
+        if i.kind == PROMPT_ISSUE_DAILY_PROMPT_MISSING and i.utterance_id
+    }
+    return config, daily_prompts, missing
+
+
 def _write_json(path: Path, payload: Any) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=True, separators=(",", ":")))
 
@@ -136,6 +339,10 @@ def _verify_corpus_dir(corpus_dir: Path, expected: ExportCounts) -> tuple[bool, 
         return False, "Speaker count mismatch."
     if conversation_count != expected.conversations:
         return False, "Conversation count mismatch."
+    try:
+        json.loads((corpus_dir / CONFIG_FILE).read_text())
+    except (OSError, ValueError):
+        return False, f"{CONFIG_FILE} is missing or does not parse."
     return True, None
 
 
@@ -144,6 +351,7 @@ async def build_convokit_export(
     export_id: str,
     since: datetime.datetime | None = None,
     until: datetime.datetime | None = None,
+    include_generation_snapshot: bool = False,
 ) -> ExportArtifact:
     query = select(Utterance).order_by(Utterance.timestamp, Utterance.id)
     if since:
@@ -172,6 +380,33 @@ async def build_convokit_export(
             select(Conversation).where(Conversation.id.in_(conversation_ids))
         )
         conversations = list(conversation_result.scalars().all())
+    owner_of = {c.id: c.owner_speaker_id for c in conversations}
+
+    config, daily_prompt_rows, daily_missing_for = await _build_config(session)
+    daily_by_day = {p.day_number: p for p in daily_prompt_rows}
+
+    summary_rows: list[WeeklySummary] = []
+    if owner_of:
+        summary_result = await session.execute(
+            select(WeeklySummary)
+            .where(WeeklySummary.user_id.in_(set(owner_of.values())))
+            .order_by(WeeklySummary.week_start, WeeklySummary.id)
+        )
+        summary_rows = list(summary_result.scalars().all())
+    summaries_by_week = {(s.user_id, s.week_start): (s.id, s.created_at) for s in summary_rows}
+
+    # All-time, not range-limited: a participant's first and last message.
+    user_speaker_ids = {s for s in speaker_ids if not s.startswith(BOT_SPEAKER_PREFIX)}
+    message_span: dict[str, tuple[datetime.datetime, datetime.datetime]] = {}
+    if user_speaker_ids:
+        span_result = await session.execute(
+            select(
+                Utterance.speaker_id, func.min(Utterance.timestamp), func.max(Utterance.timestamp)
+            )
+            .where(Utterance.speaker_id.in_(user_speaker_ids))
+            .group_by(Utterance.speaker_id)
+        )
+        message_span = {row[0]: (row[1], row[2]) for row in span_result.all()}
 
     reply_to_missing = 0
     utterance_rows: list[dict[str, Any]] = []
@@ -186,11 +421,26 @@ async def build_convokit_export(
             "texet_status": utterance.status,
             "texet_error": utterance.error,
             "texet_created_at": _iso(utterance.created_at),
+            "texet_sent_at": _iso(utterance.sent_at),
+            "texet_claimed_at": _iso(utterance.claimed_at),
+            "texet_attempts": utterance.attempts,
         }
         if utterance.reply_to_id and reply_to is None:
             meta_updates["texet_reply_to_missing"] = utterance.reply_to_id
 
         meta = _merge_meta(utterance.meta, meta_updates)
+        meta.update(
+            infer_provenance(
+                meta,
+                timestamp=utterance.timestamp,
+                owner_id=owner_of.get(utterance.conversation_id, ""),
+                reply_to_id=utterance.reply_to_id,
+                daily_prompts=daily_by_day,
+                summaries=summaries_by_week,
+                daily_missing_for=daily_missing_for,
+            )
+        )
+        meta = slim_generation(meta, include_generation_snapshot=include_generation_snapshot)
         utterance_metas.append(meta)
         convokit_conversation_id = conversation_first_utterance[utterance.conversation_id]
         utterance_rows.append(
@@ -208,10 +458,12 @@ async def build_convokit_export(
     speaker_rows: dict[str, dict[str, Any]] = {}
     speaker_metas: list[dict[str, Any]] = []
     for speaker in speakers:
-        meta = _merge_meta(
-            speaker.meta,
-            {"texet_created_at": _iso(speaker.created_at)},
-        )
+        speaker_updates: dict[str, Any] = {"texet_created_at": _iso(speaker.created_at)}
+        if speaker.id in message_span:
+            first, last = message_span[speaker.id]
+            speaker_updates["texet_first_message_at"] = _iso(first)
+            speaker_updates["texet_last_message_at"] = _iso(last)
+        meta = _merge_meta(speaker.meta, speaker_updates)
         speaker_rows[speaker.id] = meta
         speaker_metas.append(meta)
 
@@ -229,6 +481,16 @@ async def build_convokit_export(
                 "texet_status": conversation.status,
                 "texet_last_activity_at": _iso(conversation.last_activity_at),
                 "texet_created_at": _iso(conversation.created_at),
+                "texet_weekly_summaries": [
+                    {
+                        "id": s.id,
+                        "week_start": s.week_start.isoformat(),
+                        "summary": s.summary,
+                        "created_at": _iso(s.created_at),
+                    }
+                    for s in summary_rows
+                    if s.user_id == conversation.owner_speaker_id
+                ],
             },
         )
         conversation_rows[convokit_id] = meta
@@ -249,6 +511,9 @@ async def build_convokit_export(
         "texet_conversation_count": counts.conversations,
         "texet_speaker_count": counts.speakers,
         "texet_reply_to_missing": counts.reply_to_missing,
+        "texet_export_version": EXPORT_VERSION,
+        "texet_include_generation_snapshot": include_generation_snapshot,
+        "texet_git_commit": _git_commit(),
     }
 
     temp_dir = Path(tempfile.mkdtemp(prefix=f"{CORPUS_PREFIX}_"))
@@ -260,6 +525,7 @@ async def build_convokit_export(
         _write_json(corpus_dir / "speakers.json", speaker_rows)
         _write_json(corpus_dir / "conversations.json", conversation_rows)
         _write_json(corpus_dir / "corpus.json", corpus_meta)
+        _write_json(corpus_dir / CONFIG_FILE, config)
 
         index_payload = {
             "utterances-index": _meta_index(utterance_metas),
@@ -285,6 +551,8 @@ async def build_convokit_export(
         meta = {
             "corpus_dir": corpus_dir.name,
             "reply_to_missing": counts.reply_to_missing,
+            "export_version": EXPORT_VERSION,
+            "include_generation_snapshot": include_generation_snapshot,
         }
 
         return ExportArtifact(
@@ -408,6 +676,12 @@ def _render_exports_page(
               <label for="until">End</label>
               <input type="datetime-local" id="until" name="until" />
             </div>
+            <div>
+              <label>
+                <input type="checkbox" name="include_generation_snapshot" />
+                Full generation snapshot (large)
+              </label>
+            </div>
             <button type="submit">Export ConvoKit corpus</button>
           </form>
           <h2>Recent exports</h2>
@@ -478,7 +752,11 @@ async def console_exports_create(
 
     try:
         artifact = await build_convokit_export(
-            session, export_id=export_id, since=since, until=until
+            session,
+            export_id=export_id,
+            since=since,
+            until=until,
+            include_generation_snapshot=bool(form.get("include_generation_snapshot")),
         )
     except Exception as exc:
         await session.rollback()

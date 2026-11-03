@@ -42,8 +42,11 @@ DEFAULT_SUMMARIZATION_PROMPT = (
 )
 
 
+BOT_SPEAKER_PREFIX = "bot:"
+
+
 def bot_speaker_id(user_id: str) -> str:
-    prefix = "bot:"
+    prefix = BOT_SPEAKER_PREFIX
     if len(user_id) <= 128 - len(prefix):
         return f"{prefix}{user_id}"
     digest = hashlib.sha256(user_id.encode("utf-8")).hexdigest()
@@ -170,11 +173,15 @@ async def get_summarization_prompt(session: AsyncSession) -> str:
     return value
 
 
-async def get_instruction_template(session: AsyncSession) -> str:
+async def get_latest_instruction_template(session: AsyncSession) -> InstructionTemplate | None:
     result = await session.execute(
         select(InstructionTemplate).order_by(InstructionTemplate.created_at.desc()).limit(1)
     )
-    row = result.scalar_one_or_none()
+    return result.scalar_one_or_none()
+
+
+async def get_instruction_template(session: AsyncSession) -> str:
+    row = await get_latest_instruction_template(session)
     if not row:
         return DEFAULT_INSTRUCTION_TEMPLATE
 
@@ -356,18 +363,26 @@ async def get_participant_utc_offset(
     return extract_utc_offset(meta)
 
 
-async def get_weekly_summary(
+async def get_weekly_summary_row(
     session: AsyncSession,
     user_id: str,
     week_start: datetime.date,
-) -> str | None:
+) -> WeeklySummary | None:
     result = await session.execute(
         select(WeeklySummary).where(
             WeeklySummary.user_id == user_id,
             WeeklySummary.week_start == week_start,
         )
     )
-    row = result.scalar_one_or_none()
+    return result.scalar_one_or_none()
+
+
+async def get_weekly_summary(
+    session: AsyncSession,
+    user_id: str,
+    week_start: datetime.date,
+) -> str | None:
+    row = await get_weekly_summary_row(session, user_id, week_start)
     return row.summary if row else None
 
 
