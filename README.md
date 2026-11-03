@@ -32,6 +32,7 @@ Notes:
 - Console access requires `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_SECRET_KEY` (optional env vars that enable the console/admin UI).
 - API docs run against the current environment. Use test keys/data when validating changes.
 - Exports are logged in the console (status, counts, verification, timestamps).
+- Export v2 adds `texet_config.json` (config tables), config provenance on each bot reply (`texet_system_prompt_sha256` is the reliable key: the console edits config rows in place), and delivery timing. By default the export drops `texet_generation.system_prompt` and `chat_history`; tick "Full generation snapshot" to keep them. Every model column is either exported or excluded with a reason in `EXPORTED` / `EXPORT_EXCLUDED` (`app/console/exports.py`), and a test enforces this.
 
 ## Using the API (local)
 

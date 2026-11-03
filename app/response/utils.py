@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 import datetime
+import hashlib
 import re
 from typing import Any
+
+
+def prompt_sha256(text: str) -> str:
+    """Hash of a composed system prompt, so prompts compare without the text."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def week_start_utc(dt: datetime.datetime) -> datetime.date:
