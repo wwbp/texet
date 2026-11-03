@@ -1,5 +1,6 @@
 import datetime
 import hashlib
+from collections.abc import Awaitable, Callable
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -29,35 +30,45 @@ async def _get_api_key(session: AsyncSession, token: str) -> ApiKey | None:
     return result.scalar_one_or_none()
 
 
-async def require_auth(
-    credentials: HTTPAuthorizationCredentials | None = Depends(_security),
-    session: AsyncSession = Depends(get_async_session),
-) -> None:
-    try:
-        if not credentials:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Unauthorized.",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+API_KEY_SCOPE_RESPONSE = "response"
+API_KEY_SCOPE_EXPORT = "export"
+API_KEY_SCOPES = (API_KEY_SCOPE_RESPONSE, API_KEY_SCOPE_EXPORT)
 
-        if credentials.scheme.lower() != "bearer":
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Unauthorized.",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
 
-        token = credentials.credentials
-        if not token:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Unauthorized.",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+def _unauthorized() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Unauthorized.",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
-        api_key = await _get_api_key(session, token)
-        if api_key:
+
+def require_scope(scope: str) -> Callable[..., Awaitable[str]]:
+    """Dependency: 401 without a valid active key, 403 if the key lacks `scope`.
+
+    Returns the key id. It is captured before the rollback below expires the
+    row, so callers can log it without a lazy load.
+    """
+
+    async def dependency(
+        credentials: HTTPAuthorizationCredentials | None = Depends(_security),
+        session: AsyncSession = Depends(get_async_session),
+    ) -> str:
+        try:
+            if (
+                not credentials
+                or credentials.scheme.lower() != "bearer"
+                or not credentials.credentials
+            ):
+                raise _unauthorized()
+
+            api_key = await _get_api_key(session, credentials.credentials)
+            if not api_key:
+                raise _unauthorized()
+            if api_key.scope != scope:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden.")
+
+            key_id = api_key.id
             now = datetime.datetime.now(DEFAULT_TIMEZONE)
             if (
                 api_key.last_used_at is None
@@ -65,13 +76,13 @@ async def require_auth(
             ):
                 api_key.last_used_at = now
                 await session.commit()
-            return
+            return key_id
+        finally:
+            if session.in_transaction():
+                await session.rollback()
 
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Unauthorized.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    finally:
-        if session.in_transaction():
-            await session.rollback()
+    return dependency
+
+
+require_auth = require_scope(API_KEY_SCOPE_RESPONSE)
+require_export = require_scope(API_KEY_SCOPE_EXPORT)

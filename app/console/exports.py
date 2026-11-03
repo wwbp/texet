@@ -98,6 +98,7 @@ EXPORT_EXCLUDED: dict[str, str] = {
     "api_keys.key_prefix": "partial secret",
     "api_keys.is_active": "credential metadata, not study data",
     "api_keys.last_used_at": "credential metadata, not study data",
+    "api_keys.scope": "credential metadata, not study data",
     "api_keys.created_at": "credential metadata, not study data",
     "admin_exports.*": "the export audit log itself, not study data",
 }
@@ -726,25 +727,22 @@ async def console_exports(
     return _render_exports_page(exports)
 
 
-@console_router.post("/exports")
-async def console_exports_create(
-    request: Request,
-    background_tasks: BackgroundTasks,
-    session: AsyncSession = Depends(get_async_session),
-    _: None = Depends(require_admin),
-) -> FileResponse:
-    form = await request.form()
-    since = _parse_datetime("since", str(form.get("since") or "").strip() or None)
-    until = _parse_datetime("until", str(form.get("until") or "").strip() or None)
+async def run_logged_export(
+    session: AsyncSession,
+    *,
+    since: datetime.datetime | None,
+    until: datetime.datetime | None,
+    include_generation_snapshot: bool,
+    record_meta: dict[str, Any] | None = None,
+) -> tuple[str, ExportArtifact]:
+    """Build an export and log it as an AdminExport row. Raises HTTPException.
+
+    The caller owns artifact.temp_dir and must remove it after sending.
+    """
     if since and until and since > until:
         raise HTTPException(status_code=400, detail="Start must be before end.")
 
-    export = AdminExport(
-        kind="convokit",
-        status="started",
-        range_start=since,
-        range_end=until,
-    )
+    export = AdminExport(kind="convokit", status="started", range_start=since, range_end=until)
     session.add(export)
     await session.flush()
     export_id = export.id
@@ -756,7 +754,7 @@ async def console_exports_create(
             export_id=export_id,
             since=since,
             until=until,
-            include_generation_snapshot=bool(form.get("include_generation_snapshot")),
+            include_generation_snapshot=include_generation_snapshot,
         )
     except Exception as exc:
         await session.rollback()
@@ -781,13 +779,30 @@ async def console_exports_create(
     export_record.verified = artifact.verified
     export_record.verification_error = artifact.verification_error
     export_record.sha256 = artifact.sha256
-    export_record.meta = artifact.meta
+    export_record.meta = {**artifact.meta, **(record_meta or {})}
     await session.commit()
 
     if not artifact.verified:
         shutil.rmtree(artifact.temp_dir, ignore_errors=True)
         raise HTTPException(status_code=500, detail="Export validation failed.")
+    return export_id, artifact
 
+
+@console_router.post("/exports")
+async def console_exports_create(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    session: AsyncSession = Depends(get_async_session),
+    _: None = Depends(require_admin),
+) -> FileResponse:
+    form = await request.form()
+    _export_id, artifact = await run_logged_export(
+        session,
+        since=_parse_datetime("since", str(form.get("since") or "").strip() or None),
+        until=_parse_datetime("until", str(form.get("until") or "").strip() or None),
+        include_generation_snapshot=bool(form.get("include_generation_snapshot")),
+        record_meta={"source": "console"},
+    )
     background_tasks.add_task(shutil.rmtree, artifact.temp_dir, ignore_errors=True)
     return FileResponse(
         artifact.zip_path,

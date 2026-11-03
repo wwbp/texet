@@ -53,6 +53,21 @@ curl -H "Authorization: Bearer <API_KEY>" \
   -d '{"user_id":"u1","input":"hello","mode":"text","metadata":{"source":"sms"}}'
 ```
 
+### Export for scripts
+
+`GET /exports/convokit?since=<iso>&until=<iso>&include_generation_snapshot=<bool>` returns the same ConvoKit zip as the console export. All parameters are optional. A datetime without a timezone is read as UTC-05:00, the same as the console.
+
+- **Auth:** an API key with the `export` scope. Create one at `/console/api-keys` and select scope `export`. A `response` key (the hub's key) gets `403`, and an `export` key cannot call `POST /response` or `GET /engagement`. Existing keys keep the `response` scope.
+- **Errors:** `401` for a missing or bad key, `403` for a wrong scope, `400` when `since > until`.
+- **Headers:** `X-Texet-Export-Sha256` (sha256 of the zip), `X-Texet-Export-Id` (the `admin_exports` row), `X-Texet-Export-Version: 2`.
+- **Logging:** every call writes an `admin_exports` row, with `meta.source = "api"` and `meta.api_key_id`.
+
+```bash
+curl -fsS -H "Authorization: Bearer <EXPORT_KEY>" -D headers.txt -o corpus.zip \
+  "http://localhost:8000/exports/convokit?since=2026-03-01T00:00:00&until=2026-04-01T00:00:00"
+shasum -a 256 corpus.zip; grep -i x-texet-export-sha256 headers.txt
+```
+
 ## Utterance status
 
 - `received`: inbound user message stored.

@@ -1,16 +1,17 @@
 import datetime
 import logging
 import os
+import shutil
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, status
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.auth import require_auth
+from app.auth import require_auth, require_export
 from app.config import (
     DEFAULT_TIMEZONE,
     admin_enabled,
@@ -20,6 +21,7 @@ from app.config import (
     scheduler_enabled,
 )
 from app.console import console_router, init_console
+from app.console.exports import EXPORT_VERSION, _ensure_tz, run_logged_export
 from app.db import get_async_session, ping_db
 from app.engagement.schemas import EngagementRow
 from app.engagement.service import compute_engagement
@@ -115,6 +117,39 @@ async def response(
     session: AsyncSession = Depends(get_async_session),
 ) -> ResponseQueuedResponse:
     return await process_response(session, payload)
+
+
+@app.get("/exports/convokit", response_class=FileResponse)
+async def export_convokit(
+    background_tasks: BackgroundTasks,
+    since: datetime.datetime | None = None,
+    until: datetime.datetime | None = None,
+    include_generation_snapshot: bool = False,
+    api_key_id: str = Depends(require_export),
+    session: AsyncSession = Depends(get_async_session),
+) -> FileResponse:
+    """The console's ConvoKit export, for scripts. Needs an export-scope key.
+
+    Naive datetimes are read in the console's default timezone.
+    """
+    export_id, artifact = await run_logged_export(
+        session,
+        since=_ensure_tz(since) if since else None,
+        until=_ensure_tz(until) if until else None,
+        include_generation_snapshot=include_generation_snapshot,
+        record_meta={"source": "api", "api_key_id": api_key_id},
+    )
+    background_tasks.add_task(shutil.rmtree, artifact.temp_dir, ignore_errors=True)
+    return FileResponse(
+        artifact.zip_path,
+        media_type="application/zip",
+        filename=artifact.zip_path.name,
+        headers={
+            "X-Texet-Export-Sha256": artifact.sha256,
+            "X-Texet-Export-Id": export_id,
+            "X-Texet-Export-Version": str(EXPORT_VERSION),
+        },
+    )
 
 
 @app.get(

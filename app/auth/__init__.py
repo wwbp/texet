@@ -1,9 +1,10 @@
 from app.auth.api_keys import create_api_key, generate_api_key
-from app.auth.service import hash_api_key, require_auth
+from app.auth.service import hash_api_key, require_auth, require_export
 
 __all__ = [
     "create_api_key",
     "generate_api_key",
     "hash_api_key",
     "require_auth",
+    "require_export",
 ]
