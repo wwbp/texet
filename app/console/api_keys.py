@@ -1,10 +1,11 @@
-from fastapi import Depends
+from fastapi import Depends, HTTPException
 from fastapi.responses import HTMLResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
 
 from app.auth.api_keys import create_api_key
+from app.auth.service import API_KEY_SCOPE_RESPONSE, API_KEY_SCOPES
 from app.config import CONSOLE_PREFIX
 from app.console.core import _escape, _serialize_datetime, console_router, require_admin
 from app.db import get_async_session
@@ -28,6 +29,7 @@ def _render_api_keys_page(keys: list[ApiKey], generated_key: str | None = None) 
             f"<td>{_escape(key.id)}</td>"
             f"<td>{_escape(key.name or '')}</td>"
             f"<td>{_escape(key.key_prefix)}</td>"
+            f"<td>{_escape(key.scope)}</td>"
             f"<td>{'yes' if key.is_active else 'no'}</td>"
             f"<td>{_escape(_serialize_datetime(key.created_at))}</td>"
             f"<td>{_escape(_serialize_datetime(key.last_used_at))}</td>"
@@ -35,7 +37,7 @@ def _render_api_keys_page(keys: list[ApiKey], generated_key: str | None = None) 
             for key in keys
         )
     else:
-        rows = '<tr><td colspan="6">No API keys yet.</td></tr>'
+        rows = '<tr><td colspan="7">No API keys yet.</td></tr>'
 
     html = f"""
     <!doctype html>
@@ -125,6 +127,13 @@ def _render_api_keys_page(keys: list[ApiKey], generated_key: str | None = None) 
               <label for="name">Name (optional)</label>
               <input type="text" id="name" name="name" />
             </div>
+            <div>
+              <label for="scope">Scope</label>
+              <select id="scope" name="scope">
+                <option value="response">response (hub: POST /response)</option>
+                <option value="export">export (GET /exports/convokit)</option>
+              </select>
+            </div>
             <button type="submit">Create key</button>
           </form>
           <h2>Existing keys</h2>
@@ -134,6 +143,7 @@ def _render_api_keys_page(keys: list[ApiKey], generated_key: str | None = None) 
                 <th>ID</th>
                 <th>Name</th>
                 <th>Prefix</th>
+                <th>Scope</th>
                 <th>Active</th>
                 <th>Created</th>
                 <th>Last Used</th>
@@ -171,8 +181,11 @@ async def console_api_keys_create(
 ) -> HTMLResponse:
     form = await request.form()
     name = str(form.get("name") or "").strip() or None
+    scope = str(form.get("scope") or API_KEY_SCOPE_RESPONSE)
+    if scope not in API_KEY_SCOPES:
+        raise HTTPException(status_code=400, detail="Unknown scope.")
     async with session.begin():
-        key = await create_api_key(session, name=name)
+        key = await create_api_key(session, name=name, scope=scope)
 
     result = await session.execute(select(ApiKey).order_by(ApiKey.created_at.desc()).limit(50))
     keys = list(result.scalars().all())

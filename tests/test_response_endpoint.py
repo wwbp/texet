@@ -1116,6 +1116,7 @@ async def test_response_returns_503_when_reply_queue_is_full(
     async_client: AsyncClient,
     async_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
+    sms_outbox: list[dict[str, str | None]],
 ) -> None:
     monkeypatch.setenv("MAX_QUEUE_DEPTH", "1")
 

@@ -17,6 +17,12 @@ class ApiKey(Base):
     key_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     key_prefix: Mapped[str] = mapped_column(String(16), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # What the key may do: "response" (the hub: POST /response, GET /engagement)
+    # or "export" (GET /exports/convokit). One scope per key, so the hub's key
+    # can never download the corpus.
+    scope: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="response", server_default="response"
+    )
     last_used_at: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
