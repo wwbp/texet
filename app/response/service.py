@@ -132,7 +132,8 @@ def _provenance_meta(
     """Flat record of the config that produced a bot reply.
 
     Config rows are edited in place in the console, so an id does not pin the
-    text. The sha256 of the composed prompt does; the ids are hints.
+    text. The sha256 covers the composed prompt (summary, daily prompt, local
+    time included): it pins what the model saw, not which config version ran.
     """
     meta: dict[str, Any] = {
         "texet_provider": provider,

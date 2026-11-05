@@ -89,6 +89,7 @@ async def test_export_key_gets_zip_with_headers(
     assert response.status_code == 200, response.text
     assert response.headers["content-type"].startswith("application/zip")
     assert response.headers["x-texet-export-version"] == "2"
+    assert response.headers["cache-control"] == "no-store"
     assert response.headers["x-texet-export-sha256"] == hashlib.sha256(response.content).hexdigest()
 
     names = zipfile.ZipFile(io.BytesIO(response.content)).namelist()

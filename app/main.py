@@ -148,6 +148,7 @@ async def export_convokit(
             "X-Texet-Export-Sha256": artifact.sha256,
             "X-Texet-Export-Id": export_id,
             "X-Texet-Export-Version": str(EXPORT_VERSION),
+            "Cache-Control": "no-store",
         },
     )
 
