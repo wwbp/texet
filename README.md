@@ -23,7 +23,7 @@ Use the console to monitor data, manage API access, and export datasets.
 
 - Console home (local): `http://localhost:8000/console`
 - Admin views (read-only): `/console/admin` (speakers, conversations, utterances)
-- API keys: `/console/api-keys` (create keys; shown once)
+- API keys: `/console/api-keys` (create keys, shown once; revoke keys, which keeps the row for audit)
 - Exports: `/console/exports` (download ConvoKit corpora; ConvoKit is a conversation dataset format)
 - API docs: `/console/docs` (interactive docs; try it out)
 
