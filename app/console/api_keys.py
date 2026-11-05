@@ -1,3 +1,5 @@
+import json
+
 from fastapi import Depends, HTTPException
 from fastapi.responses import HTMLResponse
 from sqlalchemy import select
@@ -12,7 +14,27 @@ from app.db import get_async_session
 from app.models.auth import ApiKey
 
 
-def _render_api_keys_page(keys: list[ApiKey], generated_key: str | None = None) -> HTMLResponse:
+def _revoke_form(key: ApiKey) -> str:
+    if not key.is_active:
+        return ""
+    # The browser undoes _escape before running onsubmit, so the name needs json.dumps
+    # too: _escape alone would let a quote in it break out of the JS string.
+    message = json.dumps(
+        f"Revoke API key {key.name or key.key_prefix} (scope: {key.scope})? "
+        "Clients using it stop working immediately."
+    )
+    return (
+        f'<form method="post" action="{CONSOLE_PREFIX}/api-keys/{_escape(key.id)}/revoke" '
+        f'onsubmit="return confirm({_escape(message)})" style="margin:0">'
+        '<button type="submit" class="danger">Revoke</button>'
+        "</form>"
+    )
+
+
+def _render_api_keys_page(
+    keys: list[ApiKey], generated_key: str | None = None, error_message: str | None = None
+) -> HTMLResponse:
+    error_block = f'<p class="error">{_escape(error_message)}</p>' if error_message else ""
     generated_block = ""
     if generated_key:
         generated_block = f"""
@@ -33,11 +55,12 @@ def _render_api_keys_page(keys: list[ApiKey], generated_key: str | None = None) 
             f"<td>{'yes' if key.is_active else 'no'}</td>"
             f"<td>{_escape(_serialize_datetime(key.created_at))}</td>"
             f"<td>{_escape(_serialize_datetime(key.last_used_at))}</td>"
+            f"<td>{_revoke_form(key)}</td>"
             f"</tr>"
             for key in keys
         )
     else:
-        rows = '<tr><td colspan="7">No API keys yet.</td></tr>'
+        rows = '<tr><td colspan="8">No API keys yet.</td></tr>'
 
     html = f"""
     <!doctype html>
@@ -68,6 +91,7 @@ def _render_api_keys_page(keys: list[ApiKey], generated_key: str | None = None) 
           h2{{margin:24px 0 10px;font-size:16px}}
           p{{margin:0;color:var(--muted);line-height:1.5}}
           .muted{{color:var(--muted);font-size:13px}}
+          .error{{margin-top:12px;color:#b42318;font-size:13px}}
           .panel{{
             margin:16px 0;
             padding:14px;
@@ -98,6 +122,7 @@ def _render_api_keys_page(keys: list[ApiKey], generated_key: str | None = None) 
             font-weight:600;
             cursor:pointer;
           }}
+          button.danger{{border-color:#b42318;background:#b42318}}
           table{{
             width:100%;
             border-collapse:collapse;
@@ -121,6 +146,7 @@ def _render_api_keys_page(keys: list[ApiKey], generated_key: str | None = None) 
         <div class="wrap">
           <h1>API Keys</h1>
           <p>Create a key for clients. The full key is shown once.</p>
+          {error_block}
           {generated_block}
           <form method="post" action="{CONSOLE_PREFIX}/api-keys">
             <div>
@@ -147,6 +173,7 @@ def _render_api_keys_page(keys: list[ApiKey], generated_key: str | None = None) 
                 <th>Active</th>
                 <th>Created</th>
                 <th>Last Used</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -160,7 +187,7 @@ def _render_api_keys_page(keys: list[ApiKey], generated_key: str | None = None) 
       </body>
     </html>
     """
-    return HTMLResponse(html.strip())
+    return HTMLResponse(html.strip(), status_code=404 if error_message else 200)
 
 
 @console_router.get("/api-keys", response_class=HTMLResponse)
@@ -190,3 +217,20 @@ async def console_api_keys_create(
     result = await session.execute(select(ApiKey).order_by(ApiKey.created_at.desc()).limit(50))
     keys = list(result.scalars().all())
     return _render_api_keys_page(keys, generated_key=key)
+
+
+@console_router.post("/api-keys/{key_id}/revoke", response_class=HTMLResponse)
+async def console_api_keys_revoke(
+    key_id: str,
+    session: AsyncSession = Depends(get_async_session),
+    _: None = Depends(require_admin),
+) -> HTMLResponse:
+    # Never delete the row: admin_exports.meta.api_key_id refers to it for audit.
+    async with session.begin():
+        key = await session.get(ApiKey, key_id)
+        if key:
+            key.is_active = False
+
+    result = await session.execute(select(ApiKey).order_by(ApiKey.created_at.desc()).limit(50))
+    keys = list(result.scalars().all())
+    return _render_api_keys_page(keys, error_message=None if key else "API key not found.")
