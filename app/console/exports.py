@@ -267,8 +267,10 @@ async def _build_config(
         "export_version": EXPORT_VERSION,
         "note": (
             "The console edits these rows in place and can delete them, so the text here is "
-            "the current value, not always the text that produced an older reply. Compare "
-            "replies by utterance meta texet_system_prompt_sha256."
+            "the current value, not always the text that produced an older reply. Utterance "
+            "meta texet_system_prompt_sha256 hashes the composed prompt, which includes the "
+            "participant's summary, the daily prompt and the local time. It identifies the "
+            "exact prompt sent to the model and does not identify a config version."
         ),
         "system_prompts": [
             _row_dict(r)
@@ -808,4 +810,5 @@ async def console_exports_create(
         artifact.zip_path,
         media_type="application/zip",
         filename=artifact.zip_path.name,
+        headers={"Cache-Control": "no-store"},
     )

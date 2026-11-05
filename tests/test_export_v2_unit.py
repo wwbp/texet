@@ -7,6 +7,7 @@ import hashlib
 
 from app.console.exports import infer_provenance, slim_generation
 from app.models.response import DailyPrompt
+from app.response.prompt import compose_instruction_prompt
 from app.response.service import _provenance_meta
 from app.response.utils import prompt_sha256
 
@@ -164,3 +165,19 @@ def test_infer_marks_daily_prompt_missing_from_prompt_issue() -> None:
     inferred = _infer({"texet_generation": _snapshot()}, missing={"user-utt"})
     assert inferred["texet_daily_prompt_missing"] is True
     assert inferred["texet_daily_prompt_id"] is None
+
+
+def test_composed_prompt_hash_differs_per_participant_under_one_config() -> None:
+    """Same config, different weekly summary: so the hash is not a config version."""
+
+    def composed(summary: str) -> str:
+        return compose_instruction_prompt(
+            base="BASE",
+            daily_content="DAILY",
+            weekly_summary=summary,
+            user_local_time=None,
+            day_number=3,
+            template="{base}\n\n{daily_content}\n\n{weekly_summary}",
+        )
+
+    assert prompt_sha256(composed("alice")) != prompt_sha256(composed("bob"))

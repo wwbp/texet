@@ -361,6 +361,7 @@ async def _export(client: AsyncClient, **form: str) -> tuple[zipfile.ZipFile, st
         "/console/exports", headers=_basic_auth_header("admin", "secret"), data=form
     )
     assert response.status_code == 200, response.text
+    assert response.headers["cache-control"] == "no-store"
     archive = zipfile.ZipFile(io.BytesIO(response.content))
     return archive, archive.namelist()[0].split("/")[0]
 
@@ -431,6 +432,7 @@ async def test_export_v2_default(console_client: AsyncClient, async_session: Asy
     # Config file.
     config = json.loads(archive.read(f"{root}/texet_config.json"))
     assert config["export_version"] == 2
+    assert "does not identify a config version" in config["note"]
     assert [p["id"] for p in config["system_prompts"]] == ["sp1", "sp2"]
     assert set(config["system_prompts"][0]) >= {
         "id",
